@@ -23,6 +23,10 @@ const RUN_SPEED = 5; // running (hold Shift)
 const WATER_SPEED_FACTOR = 0.4; // in water the soldier moves at 40% of normal speed
 const PLAYER_MAX_HEALTH = 100;
 
+// Buildings (outlines from OpenStreetMap, in buildings.js)
+const PLAYER_RADIUS = 0.5; // metres: how close the soldier's centre can get to a wall
+const PATH_GRID_SIZE = 2; // metres: size of each square when finding a path around buildings
+
 // Attacking (press Space)
 const ATTACK_RANGE = 20; // metres
 const ATTACK_DAMAGE = 34; // so an enemy takes 3 hits
@@ -255,17 +259,8 @@ function compassPoint(degrees) {
 
 // One degree of latitude is about 111,320 metres everywhere on Earth.
 // One degree of longitude gets shorter towards the poles, so we multiply
-// by cos(latitude). These two helpers are accurate enough over a few km.
+// by cos(latitude). This is accurate enough over a few km.
 const METRES_PER_DEGREE = 111320;
-
-// Returns the position that is a number of metres north and east of "position"
-function offsetPosition(position, metresNorth, metresEast) {
-  const metresPerDegreeLng = METRES_PER_DEGREE * Math.cos((position.lat * Math.PI) / 180);
-  return L.latLng(
-    position.lat + metresNorth / METRES_PER_DEGREE,
-    position.lng + metresEast / metresPerDegreeLng
-  );
-}
 
 // Returns how many metres north and east "to" is from "from"
 function metresApart(from, to) {
@@ -274,6 +269,382 @@ function metresApart(from, to) {
     north: (to.lat - from.lat) * METRES_PER_DEGREE,
     east: (to.lng - from.lng) * metresPerDegreeLng
   };
+}
+
+// =====================================================
+// 3b. Buildings: walls that block the player, and paths around them
+// =====================================================
+
+// --- Flat "metres" coordinates ---
+// Wall maths is much easier in metres than in latitude and longitude.
+// So for buildings we measure every point as x metres east and y metres
+// north of the soldier's starting spot.
+const METRES_PER_DEGREE_LNG = METRES_PER_DEGREE * Math.cos((START_LAT * Math.PI) / 180);
+
+function toMetres(latLng) {
+  return {
+    x: (latLng.lng - START_LNG) * METRES_PER_DEGREE_LNG,
+    y: (latLng.lat - START_LAT) * METRES_PER_DEGREE
+  };
+}
+
+function toLatLng(point) {
+  return L.latLng(START_LAT + point.y / METRES_PER_DEGREE, START_LNG + point.x / METRES_PER_DEGREE_LNG);
+}
+
+// Each building becomes a list of corners in metres, plus a box around it.
+// The box lets us skip buildings that are nowhere near the soldier.
+const buildings = BUILDINGS.map(function (outline) {
+  const corners = outline.map(function (point) {
+    return toMetres(L.latLng(point));
+  });
+  const xs = corners.map(function (c) { return c.x; });
+  const ys = corners.map(function (c) { return c.y; });
+  return {
+    corners: corners,
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minY: Math.min(...ys),
+    maxY: Math.max(...ys)
+  };
+});
+
+// Is a point inside a building's outline? This is the classic "ray casting"
+// test: imagine a line going right from the point, and count how many walls
+// it crosses. An odd number means the point is inside.
+function insideOutline(point, corners) {
+  let inside = false;
+  for (let i = 0, j = corners.length - 1; i < corners.length; j = i, i++) {
+    const a = corners[i];
+    const b = corners[j];
+    if (a.y > point.y !== b.y > point.y &&
+        point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// The closest point to "point" on the wall that runs from corner a to corner b
+function closestPointOnWall(point, a, b) {
+  const wallX = b.x - a.x;
+  const wallY = b.y - a.y;
+  const lengthSquared = wallX * wallX + wallY * wallY;
+  // How far along the wall (0 = at a, 1 = at b), kept between the two ends
+  let t = lengthSquared > 0 ? ((point.x - a.x) * wallX + (point.y - a.y) * wallY) / lengthSquared : 0;
+  t = Math.max(0, Math.min(1, t));
+  return { x: a.x + wallX * t, y: a.y + wallY * t };
+}
+
+function distanceBetween(p, q) {
+  return Math.hypot(p.x - q.x, p.y - q.y);
+}
+
+// Is this building in the way of a spot? (the spot is inside it,
+// or closer than "margin" metres to one of its walls)
+function buildingBlocks(building, point, margin) {
+  // Quick check first: if the spot is outside the building's box, it's not blocked
+  if (point.x < building.minX - margin || point.x > building.maxX + margin ||
+      point.y < building.minY - margin || point.y > building.maxY + margin) {
+    return false;
+  }
+  if (insideOutline(point, building.corners)) {
+    return true;
+  }
+  const corners = building.corners;
+  for (let i = 0, j = corners.length - 1; i < corners.length; j = i, i++) {
+    if (distanceBetween(point, closestPointOnWall(point, corners[j], corners[i])) < margin) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Can the soldier stand here?
+function isBlocked(point) {
+  for (const building of buildings) {
+    if (buildingBlocks(building, point, PLAYER_RADIUS)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Finds the closest wall to a spot (used for sliding along walls)
+function nearestWall(point) {
+  let best = null;
+  let bestDistance = Infinity;
+  for (const building of buildings) {
+    const corners = building.corners;
+    for (let i = 0, j = corners.length - 1; i < corners.length; j = i, i++) {
+      const distance = distanceBetween(point, closestPointOnWall(point, corners[j], corners[i]));
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = { a: corners[j], b: corners[i] };
+      }
+    }
+  }
+  return best;
+}
+
+// --- Moving with walls ---
+// Tries to move from "from" by dx metres east and dy metres north.
+// If a wall is in the way, the soldier slides along it instead of stopping dead.
+function moveWithWalls(from, dx, dy) {
+  const wanted = { x: from.x + dx, y: from.y + dy };
+
+  // If the soldier is somehow already inside a wall, let them walk out
+  if (!isBlocked(wanted) || isBlocked(from)) {
+    return wanted;
+  }
+
+  // Keep only the part of the movement that goes along the wall we bumped into.
+  // (Like pushing a chair diagonally into a wall: it scrapes along the wall.)
+  const wall = nearestWall(wanted);
+  const length = distanceBetween(wall.a, wall.b);
+  const alongX = (wall.b.x - wall.a.x) / length; // a 1-metre arrow pointing along the wall
+  const alongY = (wall.b.y - wall.a.y) / length;
+  const slideDistance = dx * alongX + dy * alongY;
+  const slid = { x: from.x + alongX * slideDistance, y: from.y + alongY * slideDistance };
+
+  if (!isBlocked(slid)) {
+    return slid;
+  }
+  return from; // squeezed into a corner: stay where we are
+}
+
+// --- The pathfinding grid ---
+// For click-to-walk, the mission area is covered with squares (2 m across).
+// Each square is marked as free or blocked by a building, once, when the game starts.
+// A square counts as blocked if a wall is within 1 m of its centre, so that
+// paths keep a little distance from walls.
+const PATH_WALL_MARGIN = PLAYER_RADIUS + 0.5;
+const gridOrigin = toMetres(L.latLng(BUILDINGS_AREA.south, BUILDINGS_AREA.west)); // bottom-left corner
+const gridFarCorner = toMetres(L.latLng(BUILDINGS_AREA.north, BUILDINGS_AREA.east));
+const gridColumns = Math.ceil((gridFarCorner.x - gridOrigin.x) / PATH_GRID_SIZE);
+const gridRows = Math.ceil((gridFarCorner.y - gridOrigin.y) / PATH_GRID_SIZE);
+// One number per square: 1 = blocked, 0 = free. (A Uint8Array is a fast list of small numbers.)
+const blockedSquares = new Uint8Array(gridColumns * gridRows);
+
+function squareCentre(column, row) {
+  return {
+    x: gridOrigin.x + (column + 0.5) * PATH_GRID_SIZE,
+    y: gridOrigin.y + (row + 0.5) * PATH_GRID_SIZE
+  };
+}
+
+function squareAt(point) {
+  return {
+    column: Math.floor((point.x - gridOrigin.x) / PATH_GRID_SIZE),
+    row: Math.floor((point.y - gridOrigin.y) / PATH_GRID_SIZE)
+  };
+}
+
+function insideGrid(square) {
+  return square.column >= 0 && square.row >= 0 && square.column < gridColumns && square.row < gridRows;
+}
+
+function squareIsFree(column, row) {
+  if (!insideGrid({ column: column, row: row })) {
+    return false; // outside the mission area
+  }
+  return blockedSquares[row * gridColumns + column] === 0;
+}
+
+// Mark the squares. For speed, each building only checks the squares near it.
+for (const building of buildings) {
+  const first = squareAt({ x: building.minX - PATH_WALL_MARGIN, y: building.minY - PATH_WALL_MARGIN });
+  const last = squareAt({ x: building.maxX + PATH_WALL_MARGIN, y: building.maxY + PATH_WALL_MARGIN });
+  for (let row = Math.max(0, first.row); row <= Math.min(gridRows - 1, last.row); row++) {
+    for (let column = Math.max(0, first.column); column <= Math.min(gridColumns - 1, last.column); column++) {
+      if (buildingBlocks(building, squareCentre(column, row), PATH_WALL_MARGIN)) {
+        blockedSquares[row * gridColumns + column] = 1;
+      }
+    }
+  }
+}
+
+// Finds the nearest free square to a blocked one (e.g. when you click on a roof)
+function nearestFreeSquare(square) {
+  for (let distance = 1; distance <= 15; distance++) {
+    for (let dRow = -distance; dRow <= distance; dRow++) {
+      for (let dColumn = -distance; dColumn <= distance; dColumn++) {
+        if (squareIsFree(square.column + dColumn, square.row + dRow)) {
+          return { column: square.column + dColumn, row: square.row + dRow };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// Can you walk in a straight line from p to q without hitting a blocked square?
+// We check points every half-square along the line.
+function clearLine(p, q) {
+  const steps = Math.ceil(distanceBetween(p, q) / (PATH_GRID_SIZE / 2));
+  for (let i = 1; i < steps; i++) {
+    const square = squareAt({ x: p.x + ((q.x - p.x) * i) / steps, y: p.y + ((q.y - p.y) * i) / steps });
+    if (!squareIsFree(square.column, square.row)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// A small "priority queue": it always hands back the item with the lowest
+// score first. It's a "binary heap": a list kept in a special order so that
+// adding and removing items stays fast, even with thousands of them.
+function makePriorityQueue() {
+  const items = [];
+  const scores = [];
+  return {
+    size: function () {
+      return items.length;
+    },
+    add: function (item, score) {
+      items.push(item);
+      scores.push(score);
+      let i = items.length - 1;
+      while (i > 0) { // move the new item up until its parent has a lower score
+        const parent = (i - 1) >> 1;
+        if (scores[parent] <= scores[i]) break;
+        [items[i], items[parent]] = [items[parent], items[i]];
+        [scores[i], scores[parent]] = [scores[parent], scores[i]];
+        i = parent;
+      }
+    },
+    takeLowest: function () {
+      const lowest = items[0];
+      const lastItem = items.pop();
+      const lastScore = scores.pop();
+      if (items.length > 0) {
+        items[0] = lastItem;
+        scores[0] = lastScore;
+        let i = 0;
+        while (true) { // move it down until both children have higher scores
+          const left = 2 * i + 1;
+          const right = left + 1;
+          let smallest = i;
+          if (left < items.length && scores[left] < scores[smallest]) smallest = left;
+          if (right < items.length && scores[right] < scores[smallest]) smallest = right;
+          if (smallest === i) break;
+          [items[i], items[smallest]] = [items[smallest], items[i]];
+          [scores[i], scores[smallest]] = [scores[smallest], scores[i]];
+          i = smallest;
+        }
+      }
+      return lowest;
+    }
+  };
+}
+
+// --- Finding a path (the "A*" method, pronounced "A star") ---
+// A* explores squares outwards from the start, always trying the most
+// promising square first: the one with the smallest
+//   (distance walked so far) + (straight-line distance still to go).
+// That way it heads towards the goal, but goes around buildings when it must.
+// Returns a list of map positions to walk through, or null if there's no way.
+function findPath(fromPosition, toPosition) {
+  const start = toMetres(fromPosition);
+  const goal = toMetres(toPosition);
+  let startSquare = squareAt(start);
+  let goalSquare = squareAt(goal);
+
+  // The grid only covers the mission area. Outside it, return null
+  // and the soldier simply walks straight (still sliding along walls).
+  if (!insideGrid(startSquare) || !insideGrid(goalSquare)) {
+    return null;
+  }
+
+  // If either end is on or right next to a building, use the nearest free square instead
+  let goalIsExact = true;
+  if (!squareIsFree(goalSquare.column, goalSquare.row)) {
+    goalSquare = nearestFreeSquare(goalSquare);
+    goalIsExact = false;
+  }
+  if (!squareIsFree(startSquare.column, startSquare.row)) {
+    startSquare = nearestFreeSquare(startSquare);
+  }
+  if (!goalSquare || !startSquare) {
+    return null;
+  }
+
+  const toIndex = function (column, row) { return row * gridColumns + column; };
+  const startIndex = toIndex(startSquare.column, startSquare.row);
+  const goalIndex = toIndex(goalSquare.column, goalSquare.row);
+
+  // Straight-line estimate of the distance left, counting diagonal steps
+  function estimate(column, row) {
+    const dx = Math.abs(column - goalSquare.column);
+    const dy = Math.abs(row - goalSquare.row);
+    return Math.max(dx, dy) + (Math.SQRT2 - 1) * Math.min(dx, dy);
+  }
+
+  const walked = new Float32Array(gridColumns * gridRows).fill(Infinity); // best distance found to each square
+  const cameFrom = new Int32Array(gridColumns * gridRows).fill(-1); // which square we reached it from
+  const queue = makePriorityQueue();
+  walked[startIndex] = 0;
+  queue.add(startIndex, estimate(startSquare.column, startSquare.row));
+
+  // The 8 neighbours of a square: 4 straight (cost 1) and 4 diagonal (cost 1.41)
+  const neighbours = [
+    [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
+    [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2]
+  ];
+
+  let found = false;
+  while (queue.size() > 0) {
+    const index = queue.takeLowest();
+    if (index === goalIndex) {
+      found = true;
+      break;
+    }
+    const column = index % gridColumns;
+    const row = Math.floor(index / gridColumns);
+
+    for (const [dColumn, dRow, cost] of neighbours) {
+      const nextColumn = column + dColumn;
+      const nextRow = row + dRow;
+      if (!squareIsFree(nextColumn, nextRow)) continue;
+      // Don't cut diagonally across the corner of a building
+      if (dColumn !== 0 && dRow !== 0 &&
+          (!squareIsFree(column + dColumn, row) || !squareIsFree(column, row + dRow))) continue;
+
+      const nextIndex = toIndex(nextColumn, nextRow);
+      const newWalked = walked[index] + cost;
+      if (newWalked < walked[nextIndex]) {
+        walked[nextIndex] = newWalked;
+        cameFrom[nextIndex] = index;
+        queue.add(nextIndex, newWalked + estimate(nextColumn, nextRow));
+      }
+    }
+  }
+  if (!found) return null;
+
+  // Follow the "came from" trail backwards, from the goal to the start
+  const squares = [];
+  for (let index = goalIndex; index !== -1; index = cameFrom[index]) {
+    squares.unshift(squareCentre(index % gridColumns, Math.floor(index / gridColumns)));
+  }
+  if (goalIsExact) {
+    squares[squares.length - 1] = goal; // finish exactly on the clicked spot
+  }
+
+  // Tidy the path: the grid makes zig-zags, so skip every point we can
+  // see past. We only keep a corner when a building blocks the straight line.
+  const path = [];
+  let current = start;
+  let i = 0;
+  while (i < squares.length) {
+    let furthest = i;
+    while (furthest + 1 < squares.length && clearLine(current, squares[furthest + 1])) {
+      furthest = furthest + 1;
+    }
+    path.push(squares[furthest]);
+    current = squares[furthest];
+    i = furthest + 1;
+  }
+  return path.map(toLatLng);
 }
 
 // =====================================================
@@ -366,11 +737,29 @@ window.addEventListener("blur", function () {
 });
 
 // --- Click to walk ---
-let walkDestination = null; // where the soldier is walking to (null = no click-walk)
+// Clicking finds a path around the buildings (see findPath in section 3b).
+// walkPath is the list of points still to walk through; empty = not click-walking.
+let walkPath = [];
+
+// A dashed line on the map shows the path the soldier will take
+const walkLine = L.polyline([], {
+  color: "#ffe14d",
+  weight: 3,
+  dashArray: "6 6",
+  opacity: 0.9,
+  interactive: false
+}).addTo(map);
 
 map.on("click", function (event) {
-  walkDestination = event.latlng;
+  // If there's no path (e.g. outside the mission area), just head straight there
+  walkPath = findPath(soldier.getLatLng(), event.latlng) || [event.latlng];
+  walkLine.setLatLngs([soldier.getLatLng()].concat(walkPath));
 });
+
+function stopWalking() {
+  walkPath = [];
+  walkLine.setLatLngs([]);
+}
 
 // Called every frame by the game loop. "seconds" is the time since the
 // last frame (about 1/60 of a second), so the speed is the same on every computer.
@@ -383,13 +772,24 @@ function movePlayer(seconds) {
   if (keysDown.ArrowRight) east = east + 1;
   if (keysDown.ArrowLeft) east = east - 1;
 
+  const stepLength = currentSpeed() * seconds; // metres to move this frame
+
   if (north !== 0 || east !== 0) {
-    walkDestination = null; // using the keys cancels a click-walk
-  } else if (walkDestination) {
-    // No keys held, so head towards the clicked spot instead
-    const gap = metresApart(soldier.getLatLng(), walkDestination);
+    stopWalking(); // using the keys cancels a click-walk
+  } else if (walkPath.length > 0) {
+    // No keys held, so head for the next point on the path
+    const nextPoint = walkPath[0];
+    const gap = metresApart(soldier.getLatLng(), nextPoint);
+    if (Math.hypot(gap.north, gap.east) <= stepLength) {
+      // Reached this point: step onto it, then aim for the next one
+      moveSoldier(nextPoint);
+      walkPath.shift();
+      if (walkPath.length === 0) stopWalking();
+      return;
+    }
     north = gap.north;
     east = gap.east;
+    walkLine.setLatLngs([soldier.getLatLng()].concat(walkPath));
   } else {
     // Nothing to do: the soldier stands still, still facing the same way
     showMovement("Standing", 0);
@@ -397,31 +797,29 @@ function movePlayer(seconds) {
     return;
   }
 
-  // Face the way we're moving, and pick the walking or running animation
-  playerFacing = facingDegrees(north, east);
-  const running = keysDown.Shift === true;
-  showMovement(running ? "Running" : "Walking", currentSpeed());
-  showSoldier(soldier, running ? "running" : "walking", playerFacing);
+  // Dividing by the arrow's length makes it 1 metre long, so moving
+  // diagonally isn't faster than moving straight.
+  const arrowLength = Math.hypot(north, east);
+  const here = toMetres(soldier.getLatLng());
+  const next = moveWithWalls(here, (east / arrowLength) * stepLength, (north / arrowLength) * stepLength);
 
-  const distanceLeft = Math.hypot(north, east); // length of the direction arrow
-  const stepLength = currentSpeed() * seconds; // metres to move this frame
-
-  if (walkDestination && distanceLeft <= stepLength) {
-    // Close enough: finish the walk exactly on the spot that was clicked
-    moveSoldier(walkDestination);
-    walkDestination = null;
+  const movedEast = next.x - here.x;
+  const movedNorth = next.y - here.y;
+  if (Math.hypot(movedEast, movedNorth) < 0.0001) {
+    // Completely blocked (pushing into a corner): stand still
+    if (walkPath.length > 0) stopWalking();
+    showMovement("Standing", 0);
+    showSoldier(soldier, "standing", playerFacing);
     return;
   }
 
-  // Dividing by distanceLeft makes the arrow 1 metre long, so moving
-  // diagonally isn't faster than moving straight.
-  moveSoldier(
-    offsetPosition(
-      soldier.getLatLng(),
-      (north / distanceLeft) * stepLength,
-      (east / distanceLeft) * stepLength
-    )
-  );
+  // Face the way we actually moved (along the wall, if we slid),
+  // and pick the walking or running animation
+  playerFacing = facingDegrees(movedNorth, movedEast);
+  const running = keysDown.Shift === true;
+  showMovement(running ? "Running" : "Walking", currentSpeed());
+  showSoldier(soldier, running ? "running" : "walking", playerFacing);
+  moveSoldier(toLatLng(next));
 }
 
 // Speed in metres per second: running if Shift is held, slower in water
@@ -694,7 +1092,7 @@ function endMission(won) {
   if (gameState !== "playing") return; // the mission has already ended
 
   gameState = won ? "won" : "lost";
-  walkDestination = null;
+  stopWalking();
 
   const defeated = enemies.length - enemiesAlive().length;
   if (won) {

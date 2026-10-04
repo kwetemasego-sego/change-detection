@@ -30,6 +30,7 @@ Sources: Esri, Maxar, Earthstar Geographics, HERE, Garmin, USGS, © OpenStreetMa
 | Data | Source | License |
 |---|---|---|
 | Enemy patrol routes (`patrol-routes.js`) | © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, via the Overpass API | [ODbL](https://opendatacommons.org/licenses/odbl/) |
+| Building outlines (`buildings.js`) | © OpenStreetMap contributors, via the Overpass API | ODbL |
 | Land cover in the place panel | © OpenStreetMap contributors, via the Overpass API | ODbL |
 | Elevation, weather, climate, water detection | [Open-Meteo](https://open-meteo.com/) | CC BY 4.0 |
 | Soil type | [ISRIC SoilGrids](https://soilgrids.org/) | CC BY 4.0 |
