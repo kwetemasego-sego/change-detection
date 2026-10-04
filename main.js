@@ -47,6 +47,9 @@ const MAX_CHANGE_AREA_KM = 10; // larger areas would download too much, so chang
 const DISPLAY_BRIGHT_PERCENT = 98;
 // Used if the automatic white point can't be worked out (reflectance 0.4)
 const DEFAULT_DISPLAY_WHITE = 0.4;
+// At zoom 16 a map tile pixel is about 2 m, already finer than Sentinel-2's 10 m
+// pixels. Closer than this the tiles are only enlarged, so we show a note.
+const SENTINEL_SHARPEST_ZOOM = 16;
 
 // Microsoft Planetary Computer: a free catalogue of Sentinel-2 images, a
 // service that turns any image into map tiles, and the image files themselves.
@@ -741,6 +744,7 @@ findButton.addEventListener("click", async function () {
     beforeLayer = sentinelLayer(before.item, "beforePane").addTo(map);
     afterLayer = sentinelLayer(after.item, "afterPane").addTo(map);
     showSwipe(niceDate(before.item.properties.datetime), niceDate(after.item.properties.datetime));
+    updateZoomNote();
     map.fitBounds(chosenArea);
 
     // Work out what changed (only for areas that aren't too big)
@@ -847,6 +851,11 @@ function tileUrlFor(item) {
     "?collection=sentinel-2-l2a&item=" + item.id +
     "&assets=B04&assets=B03&assets=B02" + // red, green, blue
     "&nodata=0" +
+    // Blend neighbouring 10 m pixels smoothly instead of drawing hard squares:
+    // "resampling" when the photo is enlarged, "reproject" when it is turned
+    // from the satellite's UTM grid into map tiles. "padding" reads 1 pixel
+    // past each tile edge, so the blending doesn't leave lines between tiles.
+    "&resampling=bilinear&reproject=bilinear&padding=1" +
     "&rescale=" + toStored(0) + "," + toStored(white) // black, white
   );
 }
@@ -858,12 +867,21 @@ function sentinelLayer(item, pane) {
     pane: pane,
     bounds: chosenArea,
     maxZoom: 19,
-    maxNativeZoom: 16, // Sentinel-2 pixels are 10 m; closer than this, tiles are just enlarged
+    maxNativeZoom: SENTINEL_SHARPEST_ZOOM, // closer than this, tiles are just enlarged
     attribution: "Contains modified Copernicus Sentinel data, via Microsoft Planetary Computer"
   });
   layer.item = item; // remember which photo it shows, for the brightness slider
   return layer;
 }
+
+// --- "Zoom out for a clearer image" note ---
+const zoomNote = document.getElementById("zoom-note");
+
+// Shown while photos are on the map and you're zoomed in past what 10 m pixels can show
+function updateZoomNote() {
+  zoomNote.hidden = !(beforeLayer && map.getZoom() > SENTINEL_SHARPEST_ZOOM);
+}
+map.on("zoomend", updateZoomNote);
 
 // --- The brightness slider ---
 const brightnessRow = document.getElementById("brightness-row");
@@ -904,6 +922,7 @@ function clearComparison() {
   afterInfo.textContent = "-";
   changeSection.hidden = true;
   brightnessRow.hidden = true;
+  zoomNote.hidden = true;
   swipeBar.hidden = true;
   swipeLine.hidden = true;
 }

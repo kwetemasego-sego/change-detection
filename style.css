@@ -203,6 +203,26 @@ details p {
   image-rendering: pixelated;
 }
 
+/* --- "Zoom out for a clearer image" note, at the top middle of the map --- */
+#zoom-note {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%); /* centres the note */
+  z-index: 1000;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.94);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none; /* clicks go through it to the map */
+}
+
+#zoom-note[hidden] {
+  display: none;
+}
+
 /* --- The before/after swipe slider, at the bottom middle of the screen --- */
 #swipe-bar {
   position: absolute;
