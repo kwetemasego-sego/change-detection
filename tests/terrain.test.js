@@ -82,6 +82,17 @@ test("missing heights are left out, and no heights at all gives nothing", async 
   assert.equal(await terrainOf(site.page, 4, 4, "NaN"), null);
 });
 
+test("steep squares: each 10 m square takes the slope of the 30 m square it's in", async function () {
+  const steep = await site.page.evaluate(function () {
+    // A 2 x 2 terrain grid: only the top-right 30 m square is steeper than 15°
+    const terrain = { columns: 2, rows: 2, slope: new Float32Array([3, 20, NaN, 14.9]) };
+    return Array.from(steepSquares(terrain, { columns: 6, rows: 6 }));
+  });
+  const expected = [];
+  for (let row = 0; row < 6; row++) for (let column = 0; column < 6; column++) expected.push(row < 3 && column >= 3 ? 1 : 0);
+  assert.deepEqual(steep, expected);
+});
+
 test("a square around a point is the chosen size", async function () {
   const sizes = await site.page.evaluate(function () {
     return [1, 2, 5].map(function (km) {

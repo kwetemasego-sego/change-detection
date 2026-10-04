@@ -1,6 +1,6 @@
 # Validation: does the change detection find real change?
 
-The tool was first tested on **4 October 2026** on six sites around Abu Dhabi: three with real change and three where nothing should have changed. That test found three weak spots, and the rules were then changed to fix them. All six sites were run again with the new rules, plus **two new sites** that hadn't been tested before. This page gives the results before and after the changes.
+The tool was first tested on **4 October 2026** on six sites around Abu Dhabi: three with real change and three where nothing should have changed. That test found three weak spots, and the rules were then changed to fix them. All six sites were run again with the new rules, plus **two new sites** that hadn't been tested before. This page gives the results before and after the changes. Later, a ninth site, the mountain **Jebel Hafeet**, showed a new kind of false alarm, which the terrain now removes (see [Steep slopes](#steep-slopes-jebel-hafeet)).
 
 Every site used the dates **3 July to 1 October 2026** (90 days) and a box about **2 km × 2 km** (401 ha) centred on the coordinates below. Each site was run through the website in Chrome exactly as a user would, with the default settings.
 
@@ -26,8 +26,9 @@ The rules were made general, not tuned to these sites. Every check is measured a
 | 6 | Khalifa City A (finished villas) | 24.4200, 54.5750 | **No change** | 1.4 ha (0.4%), small specks | 1.3 ha (0.3%), small specks | ✅ → ✅ Yes |
 | 7 | **New:** Riyadh City (new villas) | 24.2772, 54.6388 | **Change**: rows of new villas going up across the left half | (not tested) | 0.9 ha (0.2%): two small patches. **The new villas were not found** | ❌ No |
 | 8 | **New:** Dubai solar park (existing panel field) | 24.7091, 55.4439 | **No change** (expected, see below) | (not tested) | 25 ha (6.3%) new buildings or bare ground, all in three blocks of the field. The rest of the panel field (about 375 ha): almost nothing | ✅ Yes: those three blocks really had changed (see below) |
+| 9 | **New:** Jebel Hafeet (mountain) | 24.0590, 55.7760 | **No change** (checked by eye) | (not tested) | Without the steep slope rule: 4.6 ha (1.1%), 4.3 ha of it bright new surface on sunlit ridges. With it: 2,800 m² (0.1%) | ✅ Yes, with the steep slope rule (see [Steep slopes](#steep-slopes-jebel-hafeet)) |
 
-**Score with the new rules: 4 correct, 2 partly correct and 2 wrong** (first test, six sites: 3 correct, 2 partly, 1 wrong). The two new sites: 1 correct, 1 wrong. All the before and after images came from the same satellite path, with 0–7% cloud over the area.
+**Score with the new rules: 5 correct, 2 partly correct and 2 wrong** (first test, six sites: 3 correct, 2 partly, 1 wrong). The three new sites: 2 correct, 1 wrong. All the before and after images came from the same satellite path, with 0–7% cloud over the area.
 
 ### What counted as correct
 
@@ -67,6 +68,32 @@ At the park, most of the lawn greening is correctly marked as probably seasonal.
 
 ![Al Mushrif year apart](docs/validation/al-mushrif-year-apart.jpg)
 
+## Steep slopes: Jebel Hafeet
+
+**The problem.** When terrain was added, the change detection was also run on Jebel Hafeet, the mountain near Al Ain (2 km box centred on 24.0590, 55.7760, images from 1 July and 29 September 2026, same satellite path, 0% cloud). Nothing was built there in those months: the road, the buildings and the bare rock look the same in both photos. But **4.3 ha was marked as bright new surface**. In July the sun is almost overhead and the mountain looks evenly lit. By late September it is lower, so the ridges facing it light up and the slopes facing away fall into shade. The lit ridges got much brighter in visible light, which is exactly what the bright new surface rule looks for.
+
+**The rule.** The terrain tab already works out the slope of every 30 m square. Brightening on ground with a slope of **15° or more** no longer counts as a bright new surface, and the page and report say how much was left out this way. Only this rule uses the slope. Plants, burns and the built-up score work as before, and on flat ground nothing changes.
+
+**Why 15°.** At Jebel Hafeet the squares it removed had slopes of 25° to 53° (from the 10% to the 90% mark). In the towns of the other sites, nothing flagged as change was on a slope of 15° or more: 99% of it was under 12°, even though the elevation model includes buildings. So any limit from about 15° to 25° gives the same results here, and 15° leaves room for gentler hills.
+
+**Results on all nine sites**, without and with the rule (same images and dates as above):
+
+| Site | Bright new surface without the rule | With it | Left out (steep) | All new buildings or bare ground, without → with |
+|---|---|---|---|---|
+| Khalifa City south | 6.5 ha | 6.5 ha | 0 | 7.0 ha → 7.0 ha |
+| Lulu Island | 5.1 ha | 5.1 ha | 0 | 13.6 ha → 13.6 ha |
+| Masdar City | 0 | 0 | 0 | 1.5 ha → 1.5 ha |
+| Al Khalidiyah | 0 | 0 | 0 | 7,200 m² → 7,200 m² |
+| Al Mushrif park | 0 | 0 | 0 | 2.5 ha → 2.5 ha |
+| Khalifa City A | 0 | 0 | 0 | 6,200 m² → 6,200 m² |
+| Riyadh City | 4,000 m² | 4,000 m² | 0 | 8,400 m² → 8,400 m² |
+| Dubai solar park | 0 | 0 | 0 | 25.0 ha → 25.0 ha |
+| **Jebel Hafeet** | **4.3 ha** | **0** | **4.3 ha** | **4.6 ha → 2,700 m²** |
+
+**In simple words:** the mountain false alarm is gone, and nothing changed anywhere else, so no real change was hidden at these sites. Jebel Hafeet now has 2,800 m² (0.1%) flagged, under the 1% for a correct "no change" site. The 2,700 m² of new buildings or bare ground left there comes from the built-up score, not brightening, on very steep slopes (37° to 46°): probably also the light, but the rule doesn't touch it.
+
+![Jebel Hafeet without and with the steep slope rule](docs/validation/jebel-hafeet.jpg)
+
 ## In simple words
 
 **What got better**
@@ -83,6 +110,7 @@ At the park, most of the lawn greening is correctly marked as probably seasonal.
 - **Scattered single villas are too small.** At Riyadh City whole streets of villas went up, but each house is about one 10 m square, with bare plots between them. The old rules miss them too (0.4 ha flagged).
 - **Lawns still show as "plants gained"** between seasons. The warning and the year-apart check explain it, but don't remove it from the map.
 - A few thin lines along shorelines at Lulu Island were flagged as bright new surface.
+- **Bright fill on a steep slope wouldn't be found** since the steep slope rule, for example on terraced earthworks on a hillside. None of the sites here had any.
 
 **Bottom line**: better at bright building sites and solar farms, and honest about seasons. It is still a first look for *where* to check, best for building sites larger than a few plots. Always look at the before and after photos with the slider before believing a result.
 
@@ -131,6 +159,7 @@ The first version of the rules marked **11 ha of the Fahid tidal flats as burned
 3. **New sites.** Chosen by eye before running the tool, to test the new rules somewhere they hadn't been tried:
    - **Riyadh City**, a new town south of Abu Dhabi, where 6 km wide before/after photos showed streets of villas going up.
    - **Dubai solar park**, a panel field that high-resolution photos show was finished long ago, to test the solar rule on a second solar farm (it turned out to have changed; see above).
+4. **Jebel Hafeet** was added after the terrain was, as a steep site where nothing changed between July and September (checked by eye on the photos).
 
 The salt flats and tidal mud found during the first search weren't run through the tool. The tool leaves out water, ground that was wet before and ground near water, which should remove most tidal changes, but salt flats were not tested. A salt crust forming (rather than fading) would look like a bright new surface.
 
@@ -162,13 +191,15 @@ Each picture shows the before photo, the after photo and the results drawn on th
 **8. Dubai solar park (new)**: the three blocks that were bare sand in July and had panels again by September.
 ![Dubai solar park](docs/validation/dubai-solar-park.jpg)
 
+**9. Jebel Hafeet**: see [Steep slopes](#steep-slopes-jebel-hafeet) above.
+
 ## Running this check yourself
 
-All eight sites can be re-run with `npm run test:validation` (see [Running the tests](README.md#running-the-tests) in the README). It runs each site in headless Chrome exactly as above, checks it against the "what counted as correct" rules, and saves the numbers in `test-output/validation.json`. GitHub runs it every Monday as well. The burn sites and the pictures on this page aren't part of it.
+All nine sites can be re-run with `npm run test:validation` (see [Running the tests](README.md#running-the-tests) in the README). It runs each site in headless Chrome exactly as above, checks it against the "what counted as correct" rules, and saves the numbers in `test-output/validation.json`. GitHub runs it every Monday as well. The burn sites and the pictures on this page aren't part of it.
 
 ## Limits of this check
 
-- **Eight sites is a small test.** It shows the kinds of mistakes the tool makes, not exact accuracy figures.
+- **Nine sites is a small test.** It shows the kinds of mistakes the tool makes, not exact accuracy figures.
 - **The new settings were tried out on the first six sites' data** before the re-run, so those six results are a best case. The two new sites are the fairer test, and one of them turned out not to be the "no change" site it was chosen as.
 - **One season only** (July to October). Results for other times of year may differ, especially for plants and for brightening (a salt crust forming in spring could look like a bright new surface).
 - **"Real change" was judged by eye** on the same 10 m Sentinel-2 photos, plus high-resolution photos of unknown date for the solar park, not checked on the ground. Changes too small to see in these photos couldn't be judged.

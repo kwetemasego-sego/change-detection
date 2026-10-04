@@ -1,6 +1,7 @@
-// The full validation: runs all eight sites from VALIDATION.md on real satellite
+// The full validation: runs all nine sites from VALIDATION.md on real satellite
 // images and checks each result. Takes about 2 to 5 minutes.
 // Run it with: npm run test:validation
+// (SITES=masdar,jebel-hafeet npm run test:validation runs just those two)
 // The numbers for every site are saved in test-output/validation.json.
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
@@ -33,6 +34,10 @@ const EXPECTED = {
   "riyadh-city": function (n) {
     assert.ok(n.changedPercent >= 1, "the new villas are found");
   },
+  "jebel-hafeet": function (n) {
+    assert.ok(n.brightM2 <= 10000, "at most 1 ha of bright new surface (it was 4.3 ha before the steep slope rule)");
+    assert.ok(n.changedPercent < 1, "under 1% of an unchanged mountain is flagged");
+  },
   "dubai-solar-park": function (n) {
     assert.ok(n.builtM2 >= 150000, "at least 15 ha where panels were put back");
     assert.ok(n.builtM2 <= 400000, "the rest of the panel field is left alone");
@@ -53,7 +58,11 @@ after(async function () {
   fs.writeFileSync(path.join(folder, "validation.json"), JSON.stringify(results, null, 1));
 });
 
+// To run only some sites, list them in SITES, e.g. SITES=masdar,jebel-hafeet (PowerShell: $env:SITES="masdar")
+const only = process.env.SITES ? process.env.SITES.split(",") : null;
+
 for (const s of SITES) {
+  if (only && !only.includes(s.id)) continue;
   test(s.name + ": " + s.check, { timeout: 900000, todo: KNOWN_MISSES[s.id] }, async function () {
     const numbers = await runSite(site.page, s);
     results[s.id] = numbers;

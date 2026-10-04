@@ -87,7 +87,8 @@ test("change detection on made-up blocks", async function () {
         { visible: 0.15, swir: 0.40, nir: 0.30, ndbi: 0.14 }, { visible: 0.11, swir: 0.34, nir: 0.22, ndbi: 0.26 }],
       ["dark roof on sand", 30, 30, 6, {}, { visible: 0.18, swir: 0.40, nir: 0.27, ndbi: 0.20 }],
       ["plants gained", 45, 45, 6, { ndvi: 0.10 }, { ndvi: 0.50 }],
-      ["wet ground dried", 45, 5, 6, { visible: 0.15, swir: 0.10 }, { visible: 0.50, swir: 0.30 }]
+      ["wet ground dried", 45, 5, 6, { visible: 0.15, swir: 0.10 }, { visible: 0.50, swir: 0.30 }],
+      ["brighter on a steep slope", 30, 45, 6, {}, { visible: 0.60, swir: 0.50, ndbi: -0.05 }]
     ];
     function blockAt(column, row) {
       return BLOCKS.find(function ([, c, r, size]) {
@@ -106,8 +107,11 @@ test("change detection on made-up blocks", async function () {
       }
       return scores;
     }
-    const result = compareScores(makeScores(4), makeScores(5), { columns: columns, rows: rows });
-    const found = { brightSquares: result.brightSquares };
+    // The terrain says the "brighter on a steep slope" block is steep
+    const steep = new Uint8Array(count);
+    for (let row = 45; row < 51; row++) for (let column = 30; column < 36; column++) steep[row * columns + column] = 1;
+    const result = compareScores(makeScores(4), makeScores(5), { columns: columns, rows: rows }, steep);
+    const found = { brightSquares: result.brightSquares, steepSquaresLeftOut: result.steepSquaresLeftOut };
     for (const [name, c0, r0, size] of BLOCKS) {
       const kinds = {};
       for (let row = r0; row < r0 + size; row++) {
@@ -127,6 +131,8 @@ test("change detection on made-up blocks", async function () {
   assert.deepEqual(blocks["dark roof on sand"], { "New buildings or bare ground": 36 }, "a new dark roof on bright sand still counts");
   assert.deepEqual(blocks["plants gained"], { "Plants gained": 36 });
   assert.deepEqual(blocks["wet ground dried"], { "no change": 36 }, "wet ground drying out isn't a bright new surface");
+  assert.deepEqual(blocks["brighter on a steep slope"], { "no change": 36 }, "brightening on a steep slope isn't a bright new surface");
+  assert.equal(blocks.steepSquaresLeftOut, 36, "and it's counted as left out");
 });
 
 test("plant changes missing a year apart count as probably seasonal", async function () {

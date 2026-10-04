@@ -174,8 +174,9 @@ White fill, fresh sand, gravel and new concrete make a plot much brighter in vis
 | It wasn't wet before, or in a shadow that went away | The same checks as above, the other way round |
 | It is more than **30 m** from water and **20 m** from plants | Tides wet and dry the sand by the shore, and watering wets the ground beside lawns and trees |
 | It is part of a patch of at least **25 squares (2,500 m²)** | Brightening alone is a weaker sign than the scores. Fill is spread over plots, while a single repainted roof or a parked lorry is smaller |
+| It isn't on a slope of **15° or more** (from the [terrain](#terrain)) | The sun lights steep slopes much more or less brightly as it gets higher or lower through the year, so on a mountain, brightening is usually just the light. On Jebel Hafeet this removed 4.3 ha of false "bright new surface" between July and September, and it changed nothing at the other test sites |
 
-The summary says how much of the blue was found this way.
+The summary says how much of the blue was found this way, and how much brightening on steep slopes was left out. The search uses the terrain already read for the area; if it couldn't be read, the slope check is skipped and the summary says so.
 
 ### 4c. Seasons
 
@@ -195,9 +196,9 @@ To keep downloads small, the photo files aren't read directly for this. They sto
 
 ### How well does it work?
 
-It was tested on eight sites (3 July to 1 October 2026): six around Abu Dhabi, a new town south of the city and a solar park in Dubai. **4 were correct, 2 partly correct and 2 wrong.** The first six were also tested before the rules for bright surfaces, dark surfaces and seasons were added (then: 3 correct, 2 partly, 1 wrong).
+It was tested on nine sites (3 July to 1 October 2026): six around Abu Dhabi, a new town south of the city, a solar park in Dubai and the mountain Jebel Hafeet. **5 were correct, 2 partly correct and 2 wrong.** The first six were also tested before the rules for bright surfaces, dark surfaces and seasons were added (then: 3 correct, 2 partly, 1 wrong).
 
-- ✅ It found earthworks and white fill in the right places (Lulu Island, most of a white plot at Khalifa City), and panels put back into three blocks of the Dubai solar park. Finished neighbourhoods stayed under 1% flagged (Al Khalidiyah, Khalifa City A).
+- ✅ It found earthworks and white fill in the right places (Lulu Island, most of a white plot at Khalifa City), and panels put back into three blocks of the Dubai solar park. Finished neighbourhoods stayed under 1% flagged (Al Khalidiyah, Khalifa City A), and so did the mountain Jebel Hafeet (0.1%), once brightening on steep slopes was left out.
 - ⚠️ False alarms on Masdar's solar panel field fell from about 3 ha to under 1 ha, but less of Masdar's construction is found too. The centre of the white plot, which was wet before, is still missed.
 - ❌ **Scattered new villas** (Riyadh City) are too small to find. In a park, **lawns greening after the summer** are still flagged as plants gained, but the page warns about it, and the year-apart check put 73% of it down as probably seasonal.
 - 🔥 **Burns** were tested on the 2025 Palisades fire in Los Angeles. **99.7%** of the squares marked burned were inside the official fire perimeter. **64%** of the burned land was marked burned, and another 21% as plants lost. Around Abu Dhabi almost nothing was marked burned (0.1% or less), even on tidal mud, solar panels and winter tower shadows.
@@ -235,7 +236,7 @@ Sentinel-2 images contain modified Copernicus Sentinel data. Licences and full c
 - **Bright fill on ground that was wet before isn't counted.** Wet ground drying out also turns pale, and from space the two look the same, so wet ground is always left out.
 - **Changes to surfaces that were already dark can be missed**, for example new panels added to an old solar farm, because those are left out to stop dust and cleaning looking like change.
 - **Terrain heights are of the surface, not the bare ground.** The elevation model includes buildings and trees, so in towns the steepest slope is often the edge of a building. Heights are 30 m apart, so small features are smoothed out. "Low-lying" only uses the height above sea level: it doesn't know about sea walls or drains.
-- **Mountains can show false change.** On Jebel Hafeet, between July and late September, about 5 ha of bare mountainside was marked as bright new surface, because slopes are lit differently as the sun gets lower. Check mountain results with the slider.
+- **Steep ground.** Brightening on slopes of 15° or more isn't counted as a bright new surface, because there it's usually the sun lighting the slope differently. So bright fill on a steep slope (terraced earthworks, say) would be missed. On very steep slopes the built-up score can still show a little false change as the light moves (0.3 ha on Jebel Hafeet between July and September). Check mountain results with the slider.
 - **Seasons**: lawns, crops and trees greening or drying out show as plants gained or lost. The panel warns when the photos are from different seasons, and **Compare with a year earlier** shows how much is probably seasonal.
 - **Areas up to 10 km × 10 km** for change detection. Larger areas would download too much data into the browser.
 - **The cloud check only uses the 6 most promising photos** near each date. If they are all cloudy over your area, try other dates.
@@ -278,7 +279,7 @@ Then:
 |---|---|---|---|
 | `npm run test:quick` | The page loads, and the change rules give the right answers on made-up data: white fill is found, small bright patches and cleaned solar panels aren't, seasons are worked out, the summary adds up. The terrain numbers on made-up heights: flat ground, a known 5.7° slope, which way slopes face, the hillshade, missing heights. Also shared links (made, read back, bad ones refused, opening one starts the search, the tab kept), **Copy link**, the examples, **Click to analyse** (off and on, 1, 2 and 5 km squares, your own dates kept), the tabs, and the place search's rules (only on Search, at most once a second, answers kept, credit shown), using made-up place search answers | About 20 seconds | Only for the map libraries |
 | `npm test` | The quick tests, plus one real site (Khalifa City south) run like a user would: real Sentinel-2 images, the white plot found, the seasonal warning and the year-apart check, the same site opened from a shared link, and the PDF report. Also real terrain for flat Khalifa City south and hilly Jebel Hafeet | About 1 minute | Yes |
-| `npm run test:validation` | All eight sites from [VALIDATION.md](VALIDATION.md), each checked against what a good result looks like. The numbers are saved in `test-output/validation.json` | About 2 to 5 minutes | Yes |
+| `npm run test:validation` | All nine sites from [VALIDATION.md](VALIDATION.md), each checked against what a good result looks like. The numbers are saved in `test-output/validation.json` | About 2 to 5 minutes | Yes |
 
 Each test prints ✔ when it passes and ✖ with the reason when it fails. Riyadh City is marked as a known miss ("TODO"): it is reported but doesn't make the run fail.
 
@@ -302,10 +303,10 @@ A **release** is a named snapshot of the project at a moment when it worked, lik
 | `style.css` | How everything looks |
 | `main.js` | All the code: map, choosing an area (including Click to analyse) and dates, place search, examples and links, finding images, reading bands, change detection, terrain, time series and timelapse, downloads, swipe slider, place details |
 | `CREDITS.md` | Data sources, libraries and licences |
-| `VALIDATION.md` | Test results on eight sites, before and after the latest rule changes |
+| `VALIDATION.md` | Test results on nine sites, before and after the latest rule changes |
 | `docs/validation/` | Before, after and result pictures for each test site |
 | `docs/screenshot.jpg`, `docs/terrain.jpg` | The screenshots in this README |
-| `tests/` | The browser tests: `unit.test.js` (quick, made-up data), `sharing.test.js` (links, place search and examples, with made-up place search answers), `terrain.test.js` (terrain numbers, Click to analyse and the tabs), `smoke.test.js` (one real site), `validation.js` (all eight sites), `sites.js` (the sites and how to run one) and `helpers.js` (starts a web server and headless Chrome) |
+| `tests/` | The browser tests: `unit.test.js` (quick, made-up data), `sharing.test.js` (links, place search and examples, with made-up place search answers), `terrain.test.js` (terrain numbers, Click to analyse and the tabs), `smoke.test.js` (one real site), `validation.js` (all nine sites), `sites.js` (the sites and how to run one) and `helpers.js` (starts a web server and headless Chrome) |
 | `package.json`, `package-lock.json` | The test tool (Puppeteer) and the test commands. The site itself doesn't need them |
 | `.github/workflows/` | Instructions for GitHub Actions: the tests on every push, and the weekly validation |
 

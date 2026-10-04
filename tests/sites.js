@@ -26,7 +26,8 @@ const SITES = [
   { id: "al-mushrif", name: "Al Mushrif park", lat: 24.4560, lng: 54.3860, check: "most plant change is marked probably seasonal" },
   { id: "khalifa-city-a", name: "Khalifa City A", lat: 24.4200, lng: 54.5750, check: "under 1% flagged" },
   { id: "riyadh-city", name: "Riyadh City new villas", lat: 24.2772, lng: 54.6388, check: "the new villas are found (a known miss)" },
-  { id: "dubai-solar-park", name: "Dubai solar park", lat: 24.7091, lng: 55.4439, check: "the blocks where panels were put back are found" }
+  { id: "dubai-solar-park", name: "Dubai solar park", lat: 24.7091, lng: 55.4439, check: "the blocks where panels were put back are found" },
+  { id: "jebel-hafeet", name: "Jebel Hafeet (mountain)", lat: 24.0590, lng: 55.7760, check: "sunlit slopes aren't counted as bright new surface" }
 ];
 
 // Runs one site and returns its numbers (areas in m², percentages of the compared area)

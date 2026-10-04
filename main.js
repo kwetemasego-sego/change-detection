@@ -80,6 +80,9 @@ const LOW_LYING_METRES = 5; // ground lower than 5 m above sea level counts as l
 const SLOPING_DEGREES = 2; // ground flatter than 2° doesn't really face any direction
 const SUN_DIRECTION = 315; // the hillshade's sun shines from the north-west (compass degrees)...
 const SUN_HEIGHT = 45; // ...from 45° above the horizon
+// On slopes steeper than this, brightening alone isn't counted as a bright new surface:
+// the sun lights steep slopes very differently through the year (see compareScores)
+const STEEP_DEGREES = 15;
 
 // --- Click to analyse (section 2) ---
 const CLICK_SQUARE_KM = 2; // the square's size if nothing else is chosen (the page offers 1, 2 or 5 km)
@@ -272,7 +275,7 @@ function setArea(box) {
   copyLinkButton.disabled = false;
   copyLinkStatus.textContent = "";
   document.getElementById("results-step").hidden = false;
-  analyseTerrain(box); // section 4g: the terrain doesn't depend on the dates
+  terrainPromise = analyseTerrain(box); // section 4g: the terrain doesn't depend on the dates
 
   const centre = box.getCenter();
   const widthKm = map.distance(box.getSouthWest(), box.getSouthEast()) / 1000;
@@ -835,6 +838,7 @@ const NEW_BUILT_OR_BARE = 3;
 const SKIPPED = 4;
 const BURNED = 5;
 const BRIGHT_SURFACE = 6; // only used inside compareScores, then shown as NEW_BUILT_OR_BARE
+const STEEP_BRIGHTENING = 7; // only used inside compareScores, then not counted
 const CHANGE_COLOURS = {
   [PLANTS_GAINED]: [46, 204, 64, 220], // green
   [PLANTS_LOST]: [255, 65, 54, 220], // red
@@ -922,7 +926,8 @@ function scoresFromBands(item, [red, nir, nir20, swir, scl, swir2, blue, green])
 
 // Compares before and after, square by square. Returns the kind of change for
 // each square, plus how many squares there are of each kind.
-function compareScores(before, after, grid) {
+// "steep" (from steepSquares, or null if there's no terrain) marks the steep squares.
+function compareScores(before, after, grid, steep) {
   let kinds = new Uint8Array(before.ndvi.length);
 
   // The area's typical (middle) values over clear land. Haze and the sun's angle
@@ -979,7 +984,9 @@ function compareScores(before, after, grid) {
         }
       }
       if (kind === NO_CHANGE && isBrightNewSurface(i)) {
-        kind = BRIGHT_SURFACE;
+        // On steep slopes, brightening is usually the sun: as it gets lower or higher
+        // through the year, it lights slopes facing it much more or less brightly
+        kind = steep && steep[i] ? STEEP_BRIGHTENING : BRIGHT_SURFACE;
       }
     }
     kinds[i] = kind;
@@ -1003,8 +1010,11 @@ function compareScores(before, after, grid) {
   kinds = removeLoneSquares(kinds, grid.columns, grid.rows);
   // Brightening alone is a weaker sign than the scores, so it must cover a bigger patch
   const brightSquares = keepBigPatches(kinds, grid.columns, grid.rows, BRIGHT_SURFACE, BRIGHT_MIN_SQUARES);
+  // The same for brightening on steep slopes, to count how much was left out
+  const steepSquaresLeftOut = keepBigPatches(kinds, grid.columns, grid.rows, STEEP_BRIGHTENING, BRIGHT_MIN_SQUARES);
   for (let i = 0; i < kinds.length; i++) {
     if (kinds[i] === BRIGHT_SURFACE) kinds[i] = NEW_BUILT_OR_BARE; // shown as new buildings or bare ground
+    if (kinds[i] === STEEP_BRIGHTENING) kinds[i] = NO_CHANGE; // not counted
   }
 
   // Count how many squares there are of each kind
@@ -1013,7 +1023,7 @@ function compareScores(before, after, grid) {
   for (let i = 0; i < kinds.length; i++) {
     counts[kinds[i]]++;
   }
-  return { kinds: kinds, counts: counts, brightSquares: brightSquares };
+  return { kinds: kinds, counts: counts, brightSquares: brightSquares, steepSquaresLeftOut: steepSquaresLeftOut };
 }
 
 // The middle value of value(i) over a list of squares (half are higher, half lower)
@@ -1143,15 +1153,29 @@ function showSummary(counts, totalSquares) {
 }
 
 // Says how much of "new buildings or bare ground" was found by brightening alone
-function showBrightNote(brightSquares) {
+function showBrightNote(result) {
   const note = document.getElementById("bright-note");
-  note.hidden = brightSquares === 0;
-  note.textContent = brightSquaresText(brightSquares);
+  note.textContent = brightSquaresText(result);
+  note.hidden = note.textContent === "";
 }
 
-function brightSquaresText(brightSquares) {
-  return "New buildings or bare ground includes " + formatArea(brightSquares * SQUARE_AREA_M2) +
-    " of bright new surface, like white fill, that only got brighter.";
+// Says how much of "new buildings or bare ground" was found by brightening alone,
+// and how much brightening on steep slopes was left out. "" if there's nothing to say.
+function brightSquaresText(result) {
+  const parts = [];
+  if (result.brightSquares > 0) {
+    parts.push("New buildings or bare ground includes " + formatArea(result.brightSquares * SQUARE_AREA_M2) +
+      " of bright new surface, like white fill, that only got brighter.");
+  }
+  if (result.steepSquaresLeftOut > 0) {
+    parts.push(formatArea(result.steepSquaresLeftOut * SQUARE_AREA_M2) + " of ground on steep slopes (" +
+      STEEP_DEGREES + "° or more) that only got brighter wasn't counted: the sun lights steep slopes " +
+      "differently as it gets higher or lower through the year.");
+  }
+  if (!result.steep && result.brightSquares > 0) {
+    parts.push("There was no terrain for this area, so brightening on steep slopes couldn't be left out.");
+  }
+  return parts.join(" ");
 }
 
 // The summary's sizes and percentages as text, for the panel and the PDF report.
@@ -1273,22 +1297,26 @@ findButton.addEventListener("click", async function () {
     } else {
       statusText.textContent = "Reading the image bands and looking for changes…";
       const grid = makeGrid(chosenArea, CHANGE_PIXEL_METRES);
-      const [beforeScores, afterScores] = await Promise.all([
+      const [beforeScores, afterScores, terrain] = await Promise.all([
         readScores(before.item, grid, token),
-        readScores(after.item, grid, token)
+        readScores(after.item, grid, token),
+        terrainForSearch(chosenArea) // for the steep slopes (section 4g)
       ]);
-      const result = compareScores(beforeScores, afterScores, grid);
+      const steep = terrain ? steepSquares(terrain, grid) : null;
+      const result = compareScores(beforeScores, afterScores, grid, steep);
 
       changeLayer = drawChanges(grid, result.kinds).addTo(map);
       lastResult = {
         area: chosenArea, grid: grid, kinds: result.kinds, counts: result.counts,
-        brightSquares: result.brightSquares, before: before, after: after, sameView: pair.sameView,
+        brightSquares: result.brightSquares, steepSquaresLeftOut: result.steepSquaresLeftOut,
+        steep: steep, // null if there was no terrain, so the steep slope check wasn't used
+        before: before, after: after, sameView: pair.sameView,
         afterScores: afterScores, // kept for the year-apart check (section 4f)
         yearCheck: null
       };
       changeToggle.textContent = "Hide changes";
       showSummary(result.counts, result.kinds.length);
-      showBrightNote(result.brightSquares);
+      showBrightNote(lastResult);
       showSeasonNote(lastResult);
       statusText.textContent = "Done. Drag the slider to compare the photos under the coloured changes.";
     }
@@ -1383,7 +1411,7 @@ yearCheckButton.addEventListener("click", async function () {
     yearCheckText.textContent = "Reading the image from " + niceDate(pair.before.item.properties.datetime) + "…";
     const earlierScores = await readScores(pair.before.item, result.grid, token);
     if (lastResult !== result) return;
-    const check = compareScores(earlierScores, result.afterScores, result.grid);
+    const check = compareScores(earlierScores, result.afterScores, result.grid, result.steep);
     result.yearCheck = {
       before: pair.before, sameView: pair.sameView, kinds: check.kinds, counts: check.counts,
       seasonal: probablySeasonal(result.kinds, check.kinds)
@@ -2293,7 +2321,7 @@ async function makeReport(result) {
   }
   y += 2;
   paragraph(numbers.totalSentence);
-  if (result.brightSquares > 0) paragraph(brightSquaresText(result.brightSquares));
+  if (brightSquaresText(result)) paragraph(brightSquaresText(result));
   paragraph("Skipped because of cloud, shadow or missing data: " + numbers.skipped + ".");
   const seasons = imageSeasons(result);
   if (seasons.before !== seasons.after) {
@@ -2366,7 +2394,9 @@ async function makeReport(result) {
     "short-wave infrared did, over a patch of at least " + formatArea(BRIGHT_MIN_SQUARES * SQUARE_AREA_M2) +
     ". Ground within " + NEAR_WATER_SQUARES * CHANGE_PIXEL_METRES + " m of water or " +
     NEAR_PLANTS_SQUARES * CHANGE_PIXEL_METRES + " m of plants is left out, because drying out makes it " +
-    "brighter too.");
+    "brighter too. So is ground on slopes of " + STEEP_DEGREES + "° or more (from the terrain): as the sun gets " +
+    "higher or lower through the year it lights steep slopes much more or less brightly, so brightening " +
+    "there is usually the sun, not a new surface.");
   paragraph("Burned: the burn ratio, NBR = (near-infrared - longer short-wave infrared) / (near-infrared + longer " +
     "short-wave infrared), from bands B8A and B12, fell by at least " + BURN_THRESHOLD.toFixed(2) + " (a moderate " +
     "burn on the usual scale), where there were some plants to burn (NDVI of at least " + BURN_FUEL_NDVI.toFixed(2) +
@@ -2605,11 +2635,45 @@ async function analyseTerrain(area) {
     }
     lastTerrain = Object.assign({ area: area, grid: grid }, terrain);
     showTerrain(lastTerrain);
+    return lastTerrain;
   } catch (error) {
     if (thisTerrain !== terrainNumber) return;
     console.warn("Terrain failed:", error);
     terrainStatus.textContent = "Sorry, the elevation model couldn't be read. Please try again in a moment.";
   }
+}
+
+// Waits for the terrain of an area (it's read when the area is chosen), and
+// gives null if there isn't any: too big an area, or the elevation model failed.
+let terrainPromise = Promise.resolve(null);
+function terrainFor(area) {
+  return terrainPromise.then(function (terrain) {
+    return terrain && terrain.area === area ? terrain : null;
+  });
+}
+
+// The terrain for a search: the one read when the area was chosen, or if that
+// failed (the free service sometimes refuses), one more try
+async function terrainForSearch(area) {
+  const terrain = await terrainFor(area);
+  if (terrain || area !== chosenArea) return terrain;
+  terrainPromise = analyseTerrain(area);
+  return terrainFor(area);
+}
+
+// Marks the steep squares of a change-detection grid (1 = slope of STEEP_DEGREES
+// or more), from the terrain's 30 m slopes. Both grids cover the same area,
+// so each 10 m square takes the slope of the 30 m square it falls in.
+function steepSquares(terrain, grid) {
+  const steep = new Uint8Array(grid.columns * grid.rows);
+  for (let row = 0; row < grid.rows; row++) {
+    const terrainRow = Math.min(terrain.rows - 1, Math.floor((row + 0.5) * terrain.rows / grid.rows));
+    for (let column = 0; column < grid.columns; column++) {
+      const terrainColumn = Math.min(terrain.columns - 1, Math.floor((column + 0.5) * terrain.columns / grid.columns));
+      if (terrain.slope[terrainRow * terrain.columns + terrainColumn] >= STEEP_DEGREES) steep[row * grid.columns + column] = 1;
+    }
+  }
+  return steep;
 }
 
 // Finds the elevation tiles that cover the area and reads the height at every grid point
