@@ -67,6 +67,12 @@ body {
   color: #555;
 }
 
+/* Links in the panels (the README and the credits) */
+.hint a,
+.credits a {
+  color: #1a5fb4;
+}
+
 .status {
   margin-top: 4px;
   font-size: 13px;

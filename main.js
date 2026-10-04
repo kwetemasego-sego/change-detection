@@ -2092,6 +2092,7 @@ async function makeReport(result) {
   bullet("Haze, the sun's angle and the season change the scores a little; the thresholds above ignore most " +
     "of this, but not all. Lawns and trees greening or drying with the seasons show as plants gained or lost.");
   bullet("Real changes to surfaces that were already dark (like new panels on an old solar farm) are missed.");
+  bullet("Bright fill on ground that was wet before isn't counted, because wet ground drying out looks the same.");
   bullet("This is a quick guide, not a survey. Check the before and after photos before drawing conclusions.");
 
   // --- Credits ---

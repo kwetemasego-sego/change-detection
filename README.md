@@ -5,15 +5,15 @@
 
 See what changed in a place over a few months, using free Sentinel-2 satellite images.
 
-Draw an area on the map and pick two dates. The tool finds the clearest satellite photo near each date, lets you swipe between them, and colours in what changed: plants that grew or disappeared, and new buildings or bare ground.
+Draw an area on the map and pick two dates. The tool finds the clearest satellite photo near each date, lets you swipe between them, and colours in what changed: plants that grew or disappeared, new buildings or bare ground, and burned land. It warns when plant changes may just be the seasons, and can check them against a year earlier.
 
 **Live site: https://kwetemasego-sego.github.io/change-detection/**
 
 It runs entirely in your web browser. There is no server and no API key: it is just HTML, CSS and JavaScript, hosted on GitHub Pages.
 
-![Masdar City, Abu Dhabi: a construction site between 6 July and 29 September 2026. Blue squares show new buildings or bare ground (2.7% of the area).](docs/masdar-result.png)
+![The Satellite Change Viewer on Khalifa City south, Abu Dhabi, between 1 July and 29 September 2026: blue squares around a plot covered in white fill, green on a planted strip, and the seasonal warning in the panel.](docs/screenshot.jpg)
 
-*A construction site in Masdar City, Abu Dhabi, between 6 July and 29 September 2026. The blue squares mark new buildings or bare ground (2.7% of the area). OpenStreetMap tags this spot as "construction" too, as the place details panel on the left shows.*
+*Khalifa City south, Abu Dhabi, between 1 July and 29 September 2026. Blue marks a plot newly covered in white fill (found as a bright new surface) and green a planted strip that grew. The two photos are from summer and autumn, so the panel warns that some plant change may be seasonal; compared with a year earlier, 82% of it probably is.*
 
 ---
 
@@ -36,7 +36,7 @@ It runs entirely in your web browser. There is no server and no API key: it is j
    - **Press Play** for a timelapse of all the photos in date order. **Speed** sets how long each one stays on screen.
    - **Back to before/after**, or moving the swipe slider, returns to the before/after comparison.
 8. **Download** the results (made in your browser, nothing is uploaded):
-   - **Download report** saves a PDF: a map of the changes on the after photo, the two images' dates and cloud, the summary in hectares and percentages, the time series chart (if it has finished loading), how the changes were found, the limits and the data credits.
+   - **Download report** saves a PDF: a map of the changes on the after photo, the two images' dates and cloud, the summary in hectares and percentages (with how much was bright new surface), the seasonal warning and the year-apart check if they apply, the time series chart (if it has finished loading), how the changes were found, the limits and the data credits.
    - **Download GeoJSON** saves the changed areas as map shapes for GIS software, or for viewing at [geojson.io](https://geojson.io/). Touching squares of the same kind of change are joined into one shape. Each shape has `change` (its kind), `area_ha`, `area_m2`, `squares`, and the two image dates, plus colours that geojson.io shows.
 
 Tips:
@@ -110,7 +110,7 @@ Satellite photos of the same place are never exactly the same: haze, the sun's a
 |---|---|
 | **Plants gained** | NDVI rose by at least **0.15**, *and* the square looks like plants afterwards (NDVI **0.3** or more) |
 | **Plants lost** | NDVI fell by at least **0.15**, *and* the square looked like plants before (NDVI **0.3** or more) |
-| **New buildings or bare ground** | NDBI rose by at least **0.10** |
+| **New buildings or bare ground** | NDBI rose by at least **0.10** (except on the look-alikes below), *or* it is a bright new surface (see 4b) |
 | **Burned** | NBR fell by at least **0.27**, *and* there were some plants to burn (NDVI **0.15** or more before). This is checked first, because a fire also makes plants disappear |
 
 **Why 0.27 for burns?** On the usual scale for burn severity, a drop in NBR of about 0.1 to 0.27 means a light burn, and 0.27 or more a moderate or severe one. Smaller drops can come from plants drying out, haze or a harvest, so only clear burns are counted.
@@ -233,8 +233,8 @@ Then:
 | Command | What it checks | Time | Needs the internet? |
 |---|---|---|---|
 | `npm run test:quick` | The page loads, and the change rules give the right answers on made-up data: white fill is found, small bright patches and cleaned solar panels aren't, seasons are worked out, the summary adds up | About 5 seconds | Only for the map libraries |
-| `npm test` | The quick tests, plus one real site (Khalifa City south) run like a user would: real Sentinel-2 images, the white plot found, the seasonal warning and the year-apart check | About 20 seconds to 2 minutes | Yes |
-| `npm run test:validation` | All eight sites from [VALIDATION.md](VALIDATION.md), each checked against what a good result looks like. The numbers are saved in `test-output/validation.json` | About 3 to 10 minutes | Yes |
+| `npm test` | The quick tests, plus one real site (Khalifa City south) run like a user would: real Sentinel-2 images, the white plot found, the seasonal warning and the year-apart check | About 20 to 40 seconds | Yes |
+| `npm run test:validation` | All eight sites from [VALIDATION.md](VALIDATION.md), each checked against what a good result looks like. The numbers are saved in `test-output/validation.json` | About 2 to 5 minutes | Yes |
 
 Each test prints ✔ when it passes and ✖ with the reason when it fails. Riyadh City is marked as a known miss ("TODO"): it is reported but doesn't make the run fail.
 
@@ -244,7 +244,7 @@ The real-image tests depend on Microsoft Planetary Computer. If it is busy or do
 
 **GitHub Actions** is GitHub's robot helper. Each time code is pushed to GitHub, it borrows a fresh computer, downloads the project, installs everything and runs `npm test`. The result shows as a green ✔ or red ✖ next to each commit, and in the **Tests** badge at the top of this page. If a change breaks something, you find out straight away instead of a visitor finding it on the live site. The instructions it follows are in [`.github/workflows/tests.yml`](.github/workflows/tests.yml).
 
-The full validation is too slow for every push, so [`.github/workflows/validation.yml`](.github/workflows/validation.yml) runs it every Monday. You can also start it yourself: open the **Actions** tab, choose **Validation**, then **Run workflow**. Its numbers can be downloaded from the run's page.
+The full validation asks the free image service for a lot of data, so instead of on every push [`.github/workflows/validation.yml`](.github/workflows/validation.yml) runs it every Monday. You can also start it yourself: open the **Actions** tab, choose **Validation**, then **Run workflow**. Its numbers can be downloaded from the run's page.
 
 ### Releases
 
@@ -260,7 +260,7 @@ A **release** is a named snapshot of the project at a moment when it worked, lik
 | `CREDITS.md` | Data sources, libraries and licences |
 | `VALIDATION.md` | Test results on eight sites, before and after the latest rule changes |
 | `docs/validation/` | Before, after and result pictures for each test site |
-| `docs/masdar-result.png` | The screenshot in this README |
+| `docs/screenshot.jpg` | The screenshot at the top of this README |
 | `tests/` | The browser tests: `unit.test.js` (quick, made-up data), `smoke.test.js` (one real site), `validation.js` (all eight sites), `sites.js` (the sites and how to run one) and `helpers.js` (starts a web server and headless Chrome) |
 | `package.json`, `package-lock.json` | The test tool (Puppeteer) and the test commands. The site itself doesn't need them |
 | `.github/workflows/` | Instructions for GitHub Actions: the tests on every push, and the weekly validation |

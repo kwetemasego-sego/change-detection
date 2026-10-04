@@ -1,5 +1,5 @@
 // The full validation: runs all eight sites from VALIDATION.md on real satellite
-// images and checks each result. Takes about 3 to 10 minutes.
+// images and checks each result. Takes about 2 to 5 minutes.
 // Run it with: npm run test:validation
 // The numbers for every site are saved in test-output/validation.json.
 const { test, before, after } = require("node:test");

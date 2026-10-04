@@ -1,6 +1,6 @@
-# The full validation on all eight sites (about 3 to 10 minutes). It is too
-# slow to run on every push, so it runs every Monday, and whenever you start it
-# by hand: Actions tab > Validation > Run workflow.
+# The full validation on all eight sites (about 2 to 5 minutes). It asks the
+# free image service for a lot of data, so instead of on every push it runs every
+# Monday, and whenever you start it by hand: Actions tab > Validation > Run workflow.
 # The numbers for every site are saved as a downloadable file ("artifact").
 name: Validation
 

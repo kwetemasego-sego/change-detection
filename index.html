@@ -24,7 +24,10 @@
   <!-- Control panel that floats on top of the map -->
   <div id="info-panel">
     <div class="panel-title">Satellite Change Viewer</div>
-    <div class="hint">Compare Sentinel-2 satellite images of an area on two dates.</div>
+    <div class="hint">
+      Compare Sentinel-2 satellite images of an area on two dates.
+      <a href="https://github.com/kwetemasego-sego/change-detection#readme" target="_blank" rel="noopener">How it works, limits and test results</a>
+    </div>
 
     <div class="step">
       <strong>1. Area</strong>
@@ -95,7 +98,7 @@
       </div>
       <div id="download-status" class="small"></div>
       <details class="small">
-        <summary>How are small changes ignored?</summary>
+        <summary>How are changes found?</summary>
         <p>
           Each 10 m square gets a plant greenness score (NDVI) and a built-up score
           (NDBI), both from −1 to +1. A square only counts as changed if its plant
@@ -129,6 +132,11 @@
           because real changes cover a patch of ground. Water and shorelines, ground
           that was wet before, and ground that fell into a new shadow are left out,
           because tides and the sun make them look different without anything changing.
+        </p>
+        <p>
+          Lawns, crops and trees green up and dry out with the seasons. If your two
+          images are from different seasons, a note says so, and <b>Compare with a year
+          earlier</b> shows how much of the plant change is probably seasonal.
         </p>
       </details>
     </div>
@@ -198,7 +206,8 @@
     </dl>
     <div class="credits">
       Data: Copernicus Sentinel-2 via Microsoft Planetary Computer · Open-Meteo · ISRIC SoilGrids ·
-      © OpenStreetMap contributors · GBIF. Full credits in CREDITS.md.
+      © OpenStreetMap contributors · GBIF.
+      <a href="https://github.com/kwetemasego-sego/change-detection/blob/main/CREDITS.md" target="_blank" rel="noopener">Full credits</a>.
     </div>
   </div>
 

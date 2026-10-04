@@ -8,8 +8,8 @@ This website is built from free code, map pictures and data made by other people
 Copernicus Sentinel data is free to use, including commercially, under the
 [Legal Notice on the use of Copernicus Sentinel Data](https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice).
 
-Found and displayed through **[Microsoft Planetary Computer](https://planetarycomputer.microsoft.com/)**
-(its STAC catalogue and data tile service), used without an API key.
+Found, read and displayed through **[Microsoft Planetary Computer](https://planetarycomputer.microsoft.com/)**
+(its STAC catalogue, data tile service and image files, read with its free anonymous token), used without an API key.
 
 ## Code
 
@@ -24,6 +24,14 @@ License: MIT. Loaded from cdnjs.
 
 **[jsPDF](https://github.com/parallax/jsPDF)** 4.2.1, makes the PDF report in the browser.
 License: MIT. Loaded from cdnjs.
+
+## Testing (not part of the website)
+
+**[Puppeteer](https://pptr.dev/)**, which runs the browser tests in headless Chrome.
+License: Apache 2.0. Installed with `npm install`.
+
+The tests use [Node.js](https://nodejs.org/)'s built-in test runner and run on [GitHub Actions](https://github.com/features/actions).
+The release badge in the README comes from [Shields.io](https://shields.io/).
 
 ## Map pictures
 

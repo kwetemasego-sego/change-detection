@@ -1,6 +1,6 @@
 // Quick end-to-end test on real satellite images: runs the Khalifa City south
 // site, which uses most of the change rules (plants gained, bright new surface,
-// the seasonal warning and the year-apart check). Takes one to three minutes.
+// the seasonal warning and the year-apart check). Takes about 20 to 40 seconds.
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { openSite } = require("./helpers.js");

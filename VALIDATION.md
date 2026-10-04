@@ -52,14 +52,16 @@ All eight sites compare summer (July) with autumn (September/October), so **the 
 
 | Site | Plant change between the chosen dates | Probably seasonal (not seen a year apart) |
 |---|---|---|
-| Khalifa City south | 5.6 ha | 4.5 ha (80%) |
-| Lulu Island | 8,500 m² | 7,000 m² |
-| Masdar City | 2,700 m² | 2,700 m² |
-| Al Khalidiyah | 1.2 ha | 4,500 m² (38%) |
+| Khalifa City south | 5.6 ha | 4.5 ha (82%) |
+| Lulu Island | 8,500 m² | 7,000 m² (82%) |
+| Masdar City | 2,700 m² | 2,700 m² (100%) |
+| Al Khalidiyah | 1.2 ha | 4,500 m² (36%) |
 | **Al Mushrif park** | **9.0 ha** | **6.6 ha (73%)** |
-| Khalifa City A | 6,400 m² | 3,900 m² |
-| Riyadh City | 200 m² | 200 m² |
+| Khalifa City A | 6,400 m² | 3,900 m² (61%) |
+| Riyadh City | 200 m² | 200 m² (100%) |
 | Dubai solar park | 0 m² | (nothing to explain) |
+
+The percentages are the ones the page shows, worked out from the exact number of squares, so they can differ a little from dividing the rounded sizes.
 
 At the park, most of the lawn greening is correctly marked as probably seasonal. The rest (2.4 ha) includes a tree-lined road that also got greener over the whole year. Keep in mind that a year apart is itself a comparison: real changes made during that year show up in it too.
 
@@ -159,6 +161,10 @@ Each picture shows the before photo, the after photo and the results drawn on th
 
 **8. Dubai solar park (new)**: the three blocks that were bare sand in July and had panels again by September.
 ![Dubai solar park](docs/validation/dubai-solar-park.jpg)
+
+## Running this check yourself
+
+All eight sites can be re-run with `npm run test:validation` (see [Running the tests](README.md#running-the-tests) in the README). It runs each site in headless Chrome exactly as above, checks it against the "what counted as correct" rules, and saves the numbers in `test-output/validation.json`. GitHub runs it every Monday as well. The burn sites and the pictures on this page aren't part of it.
 
 ## Limits of this check
 
