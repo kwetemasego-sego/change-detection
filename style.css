@@ -201,6 +201,7 @@ body {
 .swatch.gained { background: rgb(46, 204, 64); }
 .swatch.lost { background: rgb(255, 65, 54); }
 .swatch.built { background: rgb(0, 116, 217); }
+.swatch.burned { background: rgb(166, 75, 0); }
 .swatch.skipped { background: rgba(150, 150, 150, 0.6); }
 
 details summary {

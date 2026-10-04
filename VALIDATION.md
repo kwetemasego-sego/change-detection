@@ -39,6 +39,43 @@ These rules were set **before** running the tool:
 
 **Bottom line**: a good first look for *where* to check, especially for building sites. But always look at the before and after photos with the slider before believing a result. Be most careful in parks, on solar farms, and where the ground turned bright white.
 
+## Burned areas
+
+Burn detection was added later (see the README for the rules) and tested separately.
+
+### A real fire: Palisades, Los Angeles, January 2025
+
+The Palisades fire started on 7 January 2025 and burned 23,449 acres (9,489 ha), both wild hillside scrub (Topanga State Park) and streets of houses (Pacific Palisades). The tool was run on a **7.4 km × 6.6 km box** (34.040 to 34.100 N, 118.600 to 118.520 W) with dates **10 December 2024 and 5 February 2025**. Those dates were chosen so the 20-day image search couldn't pick an image taken during the fire. It chose images from **18 December 2024 and 21 February 2025**, from the same satellite path, both with 0% cloud.
+
+The result was compared with the **official fire perimeter** from CAL FIRE (4,322 ha of it falls inside the box):
+
+| Measure | Result |
+|---|---|
+| Squares marked burned that are inside the official perimeter | **99.7%** (only 7 ha outside) |
+| Burned land (inside the perimeter) marked **burned** | **64%** |
+| ...marked as another change instead: plants lost / new buildings or bare ground | 21% / 3% |
+| ...with no change marked | 13%. Perimeters also include patches that didn't burn, like the houses in Palisades Highlands that were saved |
+
+**In simple words:** when it says "burned", it's almost always right. It finds most of a large fire, but some burned ground shows up as "plants lost" instead, mostly where pale ash made the ground brighter in near-infrared. The unburned village of Topanga, just outside the perimeter, was correctly left clear.
+
+![Palisades fire](docs/validation/palisades-fire.jpg)
+
+### Things that must not look like burns
+
+The same rules were run on places with dark shadows, water, dark roofs and wet ground around Abu Dhabi, where there was no fire:
+
+| Site | Dates | Why it's a trap | Marked burned |
+|---|---|---|---|
+| Al Khalidiyah | 10 Dec 2025 – 16 Jun 2026 | Long winter shadows from towers | 1,600 m² (<0.1%) |
+| Masdar City | 1 Jul – 29 Sep 2026 | Dark solar panels, new dark roofs | 0 m² |
+| Lulu Island | 6 Jul – 29 Sep 2026 | Water, new lagoon, fresh sand | 400 m² (<0.1%) |
+| Fahid Island tidal flats | 6 Jul – 29 Sep 2026 | Wet mud with green algae, drying out | 4,900 m² (0.1%) |
+| Al Mushrif and Umm Al Emarat Park | 1 Jul – 29 Sep 2026 | Lawns and trees | 4,000 m² (0.1%) |
+
+The first version of the rules marked **11 ha of the Fahid tidal flats as burned**. Wet mud with a thin green film of algae looks like "plants" before, and drying out lowers NBR just like a fire. The band values were compared: the mud got **brighter** in near-infrared (median 1.6 times), while real burns got **darker** (median 0.7 times). So the rule "near-infrared must go down" was added. It removed 96% of those false burns, but it also moved about a fifth of the real Palisades burns into "plants lost", which is why 64% are marked burned rather than 79%. For a tool used mostly around coastal Abu Dhabi, avoiding false fires on tidal flats seemed worth it.
+
+The six-site results above were recorded before burn detection was added. Re-running three of them (Masdar City, Lulu Island and Al Mushrif), the burn rule took a few squares from "plants lost" (at most 4,000 m² per site) and changed nothing else.
+
 ## How the sites were chosen
 
 1. **Change sites.** Three construction or clearing sites were needed, found without using the tool itself:

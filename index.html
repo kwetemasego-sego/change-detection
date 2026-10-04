@@ -66,6 +66,7 @@
         <li><span class="swatch gained"></span><span>Plants gained</span><b id="size-gained"></b><span id="pct-gained" class="pct"></span></li>
         <li><span class="swatch lost"></span><span>Plants lost</span><b id="size-lost"></b><span id="pct-lost" class="pct"></span></li>
         <li><span class="swatch built"></span><span>New buildings or bare ground</span><b id="size-built"></b><span id="pct-built" class="pct"></span></li>
+        <li><span class="swatch burned"></span><span>Burned</span><b id="size-burned"></b><span id="pct-burned" class="pct"></span></li>
       </ul>
       <div id="change-total"></div>
       <div class="small">
@@ -91,6 +92,14 @@
           score moved by <b>0.15</b> or more, or its built-up score rose by <b>0.10</b>
           or more. Smaller shifts usually come from haze, the sun's angle or the
           season, not from real changes on the ground.
+        </p>
+        <p>
+          A square counts as <b>burned</b> if its burn ratio (NBR) fell by <b>0.27</b> or
+          more, the level usually called a moderate burn, where there were some plants
+          to burn. Burned ground goes dark in near-infrared light but not in short-wave
+          infrared, so squares that went dark in both (shadows, water, new dark roofs)
+          are not counted as burned. Nor are squares that got brighter in near-infrared,
+          like wet mud drying out.
         </p>
         <p>
           A changed square also needs at least 2 neighbours that changed the same way,

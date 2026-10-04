@@ -36,6 +36,9 @@ const NDBI_THRESHOLD = 0.1; // built-up score must rise by at least 0.10
 // Two things can raise the built-up score without anything being built:
 const WET_SWIR = 0.15; // ground this dark in short-wave infrared before was wet (tidal mud), so drying isn't counted
 const SHADOW_DARKENING = 0.6; // ground that became this much darker (less than 60%) is usually in a new, longer shadow
+// Burned ground (see NBR in section 4b):
+const BURN_THRESHOLD = 0.27; // the burn ratio (NBR) must fall by at least 0.27, a "moderate" burn on the usual scale
+const BURN_FUEL_NDVI = 0.15; // ...and there must have been some plants to burn (NDVI 0.15+ before)
 const CHANGE_PIXEL_METRES = 10; // size of each compared square (Sentinel-2's sharpest bands are 10 m)
 const MAX_CHANGE_AREA_KM = 10; // larger areas would download too much, so changes aren't calculated
 const SQUARE_AREA_M2 = CHANGE_PIXEL_METRES * CHANGE_PIXEL_METRES; // each compared square counts as 100 m²
@@ -522,6 +525,11 @@ async function readBandOnGridOnce(item, bandName, token, projected) {
 //     so this score goes up when land is cleared, dug up or built on.
 //     It uses B8A and B11, which both have 20 m pixels. Mixing a sharp 10 m band
 //     with a blurrier 20 m band would make false changes along every shadow edge.
+//   NBR ("burn ratio") = (near-infrared - longer short-wave infrared) / (near-infrared + longer short-wave infrared)
+//     Healthy plants reflect lots of near-infrared and little of the longer
+//     short-wave infrared (band B12). Burning flips that: charred ground is dark
+//     in near-infrared but not in B12, so NBR drops sharply after a fire.
+//     It uses B8A and B12, both with 20 m pixels.
 // Then we compare the scores between the two dates.
 
 // The kinds of change, and the colour each is drawn in (red, green, blue, opacity 0-255)
@@ -530,17 +538,22 @@ const PLANTS_GAINED = 1;
 const PLANTS_LOST = 2;
 const NEW_BUILT_OR_BARE = 3;
 const SKIPPED = 4;
+const BURNED = 5;
 const CHANGE_COLOURS = {
   [PLANTS_GAINED]: [46, 204, 64, 220], // green
   [PLANTS_LOST]: [255, 65, 54, 220], // red
   [NEW_BUILT_OR_BARE]: [0, 116, 217, 220], // blue
-  [SKIPPED]: [150, 150, 150, 110] // see-through grey
+  [SKIPPED]: [150, 150, 150, 110], // see-through grey
+  [BURNED]: [166, 75, 0, 230] // dark orange
 };
+// The kinds of change, in the order they are listed on the page, in the report and in the GeoJSON
+const CHANGE_KINDS = [PLANTS_GAINED, PLANTS_LOST, NEW_BUILT_OR_BARE, BURNED];
 // What each kind of change is called on the page, in the report and in the GeoJSON file
 const CHANGE_NAMES = {
   [PLANTS_GAINED]: "Plants gained",
   [PLANTS_LOST]: "Plants lost",
-  [NEW_BUILT_OR_BARE]: "New buildings or bare ground"
+  [NEW_BUILT_OR_BARE]: "New buildings or bare ground",
+  [BURNED]: "Burned"
 };
 
 // The files store light as whole numbers: reflectance x 10000. Since 2022
@@ -550,7 +563,7 @@ function storedOffset(item) {
   return Number(item.properties["s2:processing_baseline"]) >= 4 ? 1000 : 0;
 }
 
-// Reads the five bands of one photo and works out NDVI, NDBI and which squares to skip
+// Reads the six bands of one photo and works out NDVI, NDBI, NBR and which squares to skip
 async function readScores(item, grid, token) {
   const projected = projectGrid(grid, item);
   const bands = await Promise.all(
@@ -562,10 +575,10 @@ async function readScores(item, grid, token) {
 }
 
 // The bands readScores needs, in this order
-const SCORE_BANDS = ["B04", "B08", "B8A", "B11", "SCL"];
+const SCORE_BANDS = ["B04", "B08", "B8A", "B11", "SCL", "B12"];
 
-// Works out the scores from the five bands' values (one value per grid square each)
-function scoresFromBands(item, [red, nir, nir20, swir, scl]) {
+// Works out the scores from the six bands' values (one value per grid square each)
+function scoresFromBands(item, [red, nir, nir20, swir, scl, swir2]) {
   const offset = storedOffset(item);
   function reflectance(value) {
     return Math.max(0, (value - offset) / 10000);
@@ -578,7 +591,10 @@ function scoresFromBands(item, [red, nir, nir20, swir, scl]) {
   const count = red.length;
   const ndvi = new Float32Array(count);
   const ndbi = new Float32Array(count);
+  const nbr = new Float32Array(count);
   const swirBrightness = new Float32Array(count); // short-wave infrared reflectance, 0 to 1
+  const swir2Brightness = new Float32Array(count); // the same for the longer short-wave infrared (B12)
+  const nirBrightness = new Float32Array(count); // near-infrared reflectance (B8A), 0 to 1
   const usable = new Uint8Array(count); // 1 = clear view of the ground, 0 = skip
   const water = new Uint8Array(count); // 1 = SCL says water
 
@@ -590,11 +606,18 @@ function scoresFromBands(item, [red, nir, nir20, swir, scl]) {
     const n = reflectance(nir[i]);
     const n20 = reflectance(nir20[i]);
     const s = reflectance(swir[i]);
+    const s2 = reflectance(swir2[i]);
     ndvi[i] = normalisedDifference(n, r);
     ndbi[i] = normalisedDifference(s, n20);
+    nbr[i] = normalisedDifference(n20, s2);
     swirBrightness[i] = s;
+    swir2Brightness[i] = s2;
+    nirBrightness[i] = n20;
   }
-  return { ndvi: ndvi, ndbi: ndbi, swir: swirBrightness, usable: usable, water: water };
+  return {
+    ndvi: ndvi, ndbi: ndbi, nbr: nbr, swir: swirBrightness, swir2: swir2Brightness, nir: nirBrightness,
+    usable: usable, water: water
+  };
 }
 
 // Compares before and after, square by square. Returns the kind of change for
@@ -613,7 +636,16 @@ function compareScores(before, after, grid) {
     } else {
       const ndviChange = after.ndvi[i] - before.ndvi[i];
       const ndbiChange = after.ndbi[i] - before.ndbi[i];
-      if (ndviChange >= NDVI_THRESHOLD && after.ndvi[i] >= PLANTS_NDVI) {
+      const nbrDrop = before.nbr[i] - after.nbr[i];
+      // Two look-alikes are ruled out. Shadows and new dark roofs get darker in
+      // every band, including B12; burned ground doesn't. And wet mud drying out
+      // (tidal flats) also lowers NBR, but it gets brighter in near-infrared,
+      // while burning always makes ground reflect less near-infrared.
+      const darkerEverywhere = after.swir2[i] < SHADOW_DARKENING * before.swir2[i];
+      const nirFell = after.nir[i] < before.nir[i];
+      if (nbrDrop >= BURN_THRESHOLD && before.ndvi[i] >= BURN_FUEL_NDVI && !darkerEverywhere && nirFell) {
+        kind = BURNED; // checked first: a fire also makes plants disappear
+      } else if (ndviChange >= NDVI_THRESHOLD && after.ndvi[i] >= PLANTS_NDVI) {
         kind = PLANTS_GAINED; // greener, and now really looks like plants
       } else if (ndviChange <= -NDVI_THRESHOLD && before.ndvi[i] >= PLANTS_NDVI) {
         kind = PLANTS_LOST; // less green, and it really was plants before
@@ -631,7 +663,8 @@ function compareScores(before, after, grid) {
   kinds = removeLoneSquares(kinds, grid.columns, grid.rows);
 
   // Count how many squares there are of each kind
-  const counts = { [NO_CHANGE]: 0, [PLANTS_GAINED]: 0, [PLANTS_LOST]: 0, [NEW_BUILT_OR_BARE]: 0, [SKIPPED]: 0 };
+  const counts = { [NO_CHANGE]: 0, [SKIPPED]: 0 };
+  for (const kind of CHANGE_KINDS) counts[kind] = 0;
   for (let i = 0; i < kinds.length; i++) {
     counts[kinds[i]]++;
   }
@@ -698,7 +731,7 @@ function changesCanvas(grid, kinds) {
 // Writes the sizes and percentages into the panel
 function showSummary(counts, totalSquares) {
   const numbers = summaryNumbers(counts, totalSquares);
-  for (const [kind, idEnd] of [[PLANTS_GAINED, "gained"], [PLANTS_LOST, "lost"], [NEW_BUILT_OR_BARE, "built"]]) {
+  for (const [kind, idEnd] of [[PLANTS_GAINED, "gained"], [PLANTS_LOST, "lost"], [NEW_BUILT_OR_BARE, "built"], [BURNED, "burned"]]) {
     document.getElementById("size-" + idEnd).textContent = numbers[kind].size;
     document.getElementById("pct-" + idEnd).textContent = numbers[kind].percent;
   }
@@ -721,10 +754,11 @@ function summaryNumbers(counts, totalSquares) {
     return formatArea(count * SQUARE_AREA_M2);
   }
   const numbers = {};
-  for (const kind of [PLANTS_GAINED, PLANTS_LOST, NEW_BUILT_OR_BARE]) {
+  let changed = 0;
+  for (const kind of CHANGE_KINDS) {
     numbers[kind] = { size: sizeOf(counts[kind]), percent: percentOfCompared(counts[kind]) };
+    changed += counts[kind];
   }
-  const changed = counts[PLANTS_GAINED] + counts[PLANTS_LOST] + counts[NEW_BUILT_OR_BARE];
   numbers.totalSentence =
     "Changed: " + sizeOf(changed) + " (" + percentOfCompared(changed) + ") of the " + sizeOf(compared) +
     " (" + compared.toLocaleString("en-GB") + " squares) that could be compared.";
@@ -1107,7 +1141,7 @@ async function clearestInPeriod(candidates, area, grid, stillWanted) {
     if (!stillWanted()) return null;
     try {
       const bands = await readAreaCutout(item, area, grid);
-      const areaCloud = percentHidden(bands[4]); // band 5 is SCL
+      const areaCloud = percentHidden(bands[SCORE_BANDS.indexOf("SCL")]);
       if (areaCloud > SERIES_MAX_CLOUD) continue; // too cloudy: try the next one
 
       const averages = averageScores(scoresFromBands(item, bands));
@@ -1121,7 +1155,7 @@ async function clearestInPeriod(candidates, area, grid, stillWanted) {
   return null; // no clear image in this period
 }
 
-// Asks the Planetary Computer for the five SCORE_BANDS over just the area, as a
+// Asks the Planetary Computer for the SCORE_BANDS over just the area, as a
 // small GeoTIFF with one pixel per grid point. Its rows and columns run along
 // latitude and longitude, from the north-west corner, exactly like makeGrid,
 // so pixel i is grid point i. "nearest" keeps SCL's class numbers exact.
@@ -1137,7 +1171,7 @@ async function readAreaCutout(item, area, grid) {
   const tiff = await GeoTIFF.fromArrayBuffer(await response.arrayBuffer());
   const image = await tiff.getImage();
   const bands = await image.readRasters();
-  return bands.slice(0, SCORE_BANDS.length); // (a 6th band says which pixels have data; not needed)
+  return bands.slice(0, SCORE_BANDS.length); // (one more band says which pixels have data; not needed)
 }
 
 // The average NDVI and NDBI over the clear, dry-land squares
@@ -1673,7 +1707,7 @@ async function makeReport(result) {
   paragraph("The after photo (" + niceDate(result.after.item.properties.datetime) + ") with the changes on top. " +
     "North is up. The picture is " + (widthMetres / 1000).toFixed(1) + " km wide.", { grey: true, size: 9 });
   // Legend: a coloured square for each kind of change
-  for (const kind of [PLANTS_GAINED, PLANTS_LOST, NEW_BUILT_OR_BARE, SKIPPED]) {
+  for (const kind of [...CHANGE_KINDS, SKIPPED]) {
     makeRoom(6);
     const [r, g, b] = CHANGE_COLOURS[kind];
     pdf.setFillColor(r, g, b).rect(left, y + 0.8, 3.5, 3.5, "F");
@@ -1693,6 +1727,7 @@ async function makeReport(result) {
 
   // --- Summary table ---
   heading("Changes found");
+  makeRoom(8 + 6 * CHANGE_KINDS.length); // keep the table's header with its rows
   const columnsX = [left, left + 110, left + 150]; // name, size, percentage
   pdf.setFont("helvetica", "bold").setFontSize(10).setTextColor(0);
   pdf.text("Kind of change", columnsX[0], y + 4);
@@ -1702,7 +1737,8 @@ async function makeReport(result) {
   pdf.setDrawColor(200).line(left, y, left + width, y);
   y += 1;
   pdf.setFont("helvetica", "normal");
-  for (const kind of [PLANTS_GAINED, PLANTS_LOST, NEW_BUILT_OR_BARE]) {
+  for (const kind of CHANGE_KINDS) {
+    makeRoom(6);
     pdf.text(CHANGE_NAMES[kind], columnsX[0], y + 4);
     pdf.text(numbers[kind].size, columnsX[1] + 25, y + 4, { align: "right" });
     pdf.text(numbers[kind].percent, columnsX[2] + 25, y + 4, { align: "right" });
@@ -1746,6 +1782,13 @@ async function makeReport(result) {
     ", except where the ground was wet before (short-wave infrared reflectance below " + WET_SWIR.toFixed(2) +
     ") or became much darker (less than " + Math.round(SHADOW_DARKENING * 100) + "% as bright, " +
     "usually a new shadow).");
+  paragraph("Burned: the burn ratio, NBR = (near-infrared - longer short-wave infrared) / (near-infrared + longer " +
+    "short-wave infrared), from bands B8A and B12, fell by at least " + BURN_THRESHOLD.toFixed(2) + " (a moderate " +
+    "burn on the usual scale), where there were some plants to burn (NDVI of at least " + BURN_FUEL_NDVI.toFixed(2) +
+    " before). Squares that also became much darker in B12 (less than " + Math.round(SHADOW_DARKENING * 100) +
+    "% as bright) are not counted, because that is what shadows and new dark roofs do; burned ground doesn't. " +
+    "Squares that got brighter in near-infrared are not counted either: wet mud drying out does that, while " +
+    "burning always makes ground reflect less near-infrared.");
   paragraph("Left out: squares hidden by cloud, shadow or missing data in either image (skipped), and water and " +
     "shorelines. A changed square only counts if at least 2 of its 8 neighbours changed the same way.");
 

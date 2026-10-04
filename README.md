@@ -48,6 +48,7 @@ Tips:
 | 🟩 Green | Plants gained |
 | 🟥 Red | Plants lost |
 | 🟦 Blue | New buildings or bare ground (land cleared, dug up or built on) |
+| 🟫 Dark orange | Burned (plants burned by a fire) |
 | Grey | Skipped: hidden by cloud, cloud shadow or missing data in one of the photos |
 
 The summary gives each kind as a size on the ground and as a percentage of the squares that could be compared, and says how much was skipped. Each 10 m square counts as 100 m². Sizes are in square metres (m²) for small amounts and hectares (ha) for larger ones: a hectare is 10,000 m², a square 100 m long on each side. The total size of the chosen area is shown under **Area**.
@@ -68,29 +69,33 @@ Sentinel-2 is a group of European satellites that photograph the whole Earth eve
 
 ### 2. Reading the light bands
 
-A Sentinel-2 photo is stored as several files, one per **band** (colour of light). The tool uses five:
+A Sentinel-2 photo is stored as several files, one per **band** (colour of light). The tool uses six:
 
 | Band | Light | Pixel size | Why |
 |---|---|---|---|
 | B04 | Red | 10 m | Plants absorb red light |
 | B08 | Near-infrared | 10 m | Plants reflect lots of this invisible light |
-| B8A | Near-infrared (narrow) | 20 m | Paired with B11 for the built-up score |
+| B8A | Near-infrared (narrow) | 20 m | Paired with B11 for the built-up score, and with B12 for the burn ratio |
 | B11 | Short-wave infrared | 20 m | Bare ground, concrete and roofs reflect lots of this |
+| B12 | Longer short-wave infrared | 20 m | Burned ground reflects this about as well as before, while plants' near-infrared glow disappears |
 | SCL | Scene classification | 20 m | Labels cloud, shadow and water |
 
 The files are **Cloud-Optimized GeoTIFFs**. The browser uses [geotiff.js](https://geotiffjs.github.io/) to download just the small block of pixels covering your area, usually a few MB, instead of the whole file of 200 MB or more.
 
 The tool covers your area with a grid of **10 m squares** and looks up each band's value in every square. Sentinel-2 files use a flat map grid in metres called UTM, which is different in each 6° "zone" of the Earth. Abu Dhabi sits right on the edge between two zones, so [proj4js](https://github.com/proj4js/proj4js) converts every square's latitude and longitude into each photo's own grid.
 
-### 3. Two scores for every square
+### 3. Three scores for every square
 
-For each date, every square gets two scores between −1 and +1:
+For each date, every square gets three scores between −1 and +1:
 
 - **NDVI, the plant greenness score** = (near-infrared − red) ÷ (near-infrared + red)
   Plants reflect much more near-infrared than red. About **0.5 or more** means lush plants, about **0.2** sparse plants, and **near 0 or below** sand, concrete or water.
 
 - **NDBI, the built-up score** = (short-wave infrared − near-infrared) ÷ (short-wave infrared + near-infrared)
   Bare ground, concrete and roofs reflect lots of short-wave infrared, so this score goes up when land is cleared, dug up or built on. It uses B8A and B11, which both have 20 m pixels. Mixing a sharp 10 m band with a blurrier 20 m band makes false changes appear along every shadow edge.
+
+- **NBR, the burn ratio** = (near-infrared − longer short-wave infrared) ÷ (near-infrared + longer short-wave infrared)
+  Healthy plants reflect lots of near-infrared and little of the longer short-wave infrared (B12). Fire flips that: charred ground is dark in near-infrared but not in B12, so NBR drops sharply after a burn. It uses B8A and B12, both 20 m.
 
 ### 4. Ignoring small and fake changes
 
@@ -101,6 +106,9 @@ Satellite photos of the same place are never exactly the same: haze, the sun's a
 | **Plants gained** | NDVI rose by at least **0.15**, *and* the square looks like plants afterwards (NDVI **0.3** or more) |
 | **Plants lost** | NDVI fell by at least **0.15**, *and* the square looked like plants before (NDVI **0.3** or more) |
 | **New buildings or bare ground** | NDBI rose by at least **0.10** |
+| **Burned** | NBR fell by at least **0.27**, *and* there were some plants to burn (NDVI **0.15** or more before). This is checked first, because a fire also makes plants disappear |
+
+**Why 0.27 for burns?** On the usual scale for burn severity, a drop in NBR of about 0.1 to 0.27 means a light burn, and 0.27 or more a moderate or severe one. Smaller drops can come from plants drying out, haze or a harvest, so only clear burns are counted.
 
 Some things change the scores without anything really changing, so these squares are left out:
 
@@ -108,6 +116,11 @@ Some things change the scores without anything really changing, so these squares
 - **Water and shorelines** on either date. Tides, waves and wet mud make them look different from day to day.
 - **Ground that was wet before.** It is dark in short-wave infrared (reflectance below **0.15**), and drying mud raises the built-up score.
 - **Ground that fell into a new shadow.** It became less than **60%** as bright, which usually means a longer shadow from a tall building as the sun gets lower.
+
+For burns, two look-alikes are ruled out:
+
+- **Shadows, water and new dark roofs** get darker in *every* band, including B12. Burned ground doesn't, so a square that became less than **60%** as bright in B12 isn't counted as burned.
+- **Wet mud drying out** (tidal flats) also lowers NBR, but it gets *brighter* in near-infrared. Burning always makes ground reflect less near-infrared, so a square must get darker in near-infrared to count as burned.
 
 ### 5. Ignoring lone squares
 
@@ -126,6 +139,7 @@ It was tested on six sites around Abu Dhabi (3 July to 1 October 2026): three wi
 - ✅ It found construction and earthworks in the right places (Masdar City, Lulu Island). Finished neighbourhoods stayed under 1% flagged (Al Khalidiyah, Khalifa City A).
 - ⚠️ It **missed a plot covered in bright white fill**, because the built-up score went down instead of up. It also **flagged a solar panel field** at Masdar.
 - ❌ In a park, **lawns greening after the summer** were flagged as plants gained. Compare the same month in two years to avoid seasonal changes.
+- 🔥 **Burns** were tested on the 2025 Palisades fire in Los Angeles. **99.7%** of the squares marked burned were inside the official fire perimeter. **64%** of the burned land was marked burned, and another 21% as plants lost. Around Abu Dhabi almost nothing was marked burned (0.1% or less), even on tidal mud, solar panels and winter tower shadows.
 
 Full results, pictures and how the sites were chosen: **[VALIDATION.md](VALIDATION.md)**.
 
