@@ -39,6 +39,15 @@ const SHADOW_DARKENING = 0.6; // ground that became this much darker (less than 
 const CHANGE_PIXEL_METRES = 10; // size of each compared square (Sentinel-2's sharpest bands are 10 m)
 const MAX_CHANGE_AREA_KM = 10; // larger areas would download too much, so changes aren't calculated
 
+// --- Showing the photos ---
+// Black always means "no light reflected". How bright counts as white is chosen
+// from the pixels inside your area: the brightest 2% are shown as white, and
+// everything darker is spread evenly below. That way bright desert and darker
+// city both show detail.
+const DISPLAY_BRIGHT_PERCENT = 98;
+// Used if the automatic white point can't be worked out (reflectance 0.4)
+const DEFAULT_DISPLAY_WHITE = 0.4;
+
 // Microsoft Planetary Computer: a free catalogue of Sentinel-2 images, a
 // service that turns any image into map tiles, and the image files themselves.
 // None of these need an API key. Reading the files needs a free "token"
@@ -386,7 +395,7 @@ function makeGrid(area, metres) {
       lngs[i] = area.getWest() + ((column + 0.5) * (area.getEast() - area.getWest())) / columns;
     }
   }
-  return { columns: columns, rows: rows, lats: lats, lngs: lngs };
+  return { columns: columns, rows: rows, lats: lats, lngs: lngs, metres: metres };
 }
 
 // Sentinel-2 files don't use latitude and longitude. They use a flat map grid
@@ -413,7 +422,7 @@ function projectGrid(grid, item) {
     minY = Math.min(minY, y);
     maxY = Math.max(maxY, y);
   }
-  return { xs: xs, ys: ys, minX: minX, maxX: maxX, minY: minY, maxY: maxY };
+  return { xs: xs, ys: ys, minX: minX, maxX: maxX, minY: minY, maxY: maxY, metres: grid.metres };
 }
 
 // Reads one band of a photo, and returns its value at every grid point
@@ -435,9 +444,28 @@ async function readBandOnGrid(item, bandName, token, projected) {
 
 async function readBandOnGridOnce(item, bandName, token, projected) {
   const tiff = await GeoTIFF.fromUrl(item.assets[bandName].href + "?" + token);
-  const image = await tiff.getImage();
-  const [originX, originY] = image.getOrigin(); // UTM position of the file's top-left corner
-  const [pixelWidth, pixelHeight] = image.getResolution(); // e.g. 10 and -10 (rows go south)
+  const fullImage = await tiff.getImage();
+  const [originX, originY] = fullImage.getOrigin(); // UTM position of the file's top-left corner
+  const [fullPixelWidth, fullPixelHeight] = fullImage.getResolution(); // e.g. 10 and -10 (rows go south)
+
+  // Each file also holds smaller copies of the photo ("overviews"), each half
+  // the size of the one before. If our grid squares are much bigger than the
+  // pixels, we use the smallest copy that is still detailed enough: far less to download.
+  let image = fullImage;
+  let shrink = 1; // how many times smaller the chosen copy is
+  if (projected.metres >= 2 * fullPixelWidth) {
+    const copies = await tiff.getImageCount();
+    for (let i = 1; i < copies; i++) {
+      const smaller = await tiff.getImage(i);
+      const factor = fullImage.getWidth() / smaller.getWidth();
+      if (fullPixelWidth * factor <= projected.metres) {
+        image = smaller;
+        shrink = factor;
+      }
+    }
+  }
+  const pixelWidth = fullPixelWidth * shrink;
+  const pixelHeight = fullPixelHeight * shrink;
 
   // Which block of pixels covers all our grid points? (plus 1 pixel spare on each side)
   const left = Math.max(0, Math.floor((projected.minX - originX) / pixelWidth) - 1);
@@ -488,6 +516,13 @@ const CHANGE_COLOURS = {
   [SKIPPED]: [150, 150, 150, 110] // see-through grey
 };
 
+// The files store light as whole numbers: reflectance x 10000. Since 2022
+// (processing version 04.00 and later) a 1000 has also been added to every value,
+// so it must be taken off again before working with the numbers.
+function storedOffset(item) {
+  return Number(item.properties["s2:processing_baseline"]) >= 4 ? 1000 : 0;
+}
+
 // Reads the five bands of one photo and works out NDVI, NDBI and which squares to skip
 async function readScores(item, grid, token) {
   const projected = projectGrid(grid, item);
@@ -497,10 +532,7 @@ async function readScores(item, grid, token) {
     })
   );
 
-  // The files store light as whole numbers. Since 2022 (processing version
-  // 04.00 and later) a 1000 has been added to every value, so we take it off
-  // again, then divide by 10000 to get the fraction of light reflected (0 to 1).
-  const offset = Number(item.properties["s2:processing_baseline"]) >= 4 ? 1000 : 0;
+  const offset = storedOffset(item);
   function reflectance(value) {
     return Math.max(0, (value - offset) / 10000);
   }
@@ -696,7 +728,16 @@ findButton.addEventListener("click", async function () {
     beforeInfo.textContent = describeImage(before);
     afterInfo.textContent = describeImage(after);
 
-    // Show the two photos with the swipe slider
+    // Choose the brightness range from the pixels in the area, then show the
+    // two photos with the swipe slider
+    statusText.textContent = "Adjusting the brightness for your area…";
+    displayWhite = await findDisplayWhite([before.item, after.item], chosenArea, token).catch(function (error) {
+      console.warn("Could not work out the brightness:", error);
+      return DEFAULT_DISPLAY_WHITE;
+    });
+    brightnessSlider.value = 100;
+    brightnessText.textContent = "100%";
+    brightnessRow.hidden = false;
     beforeLayer = sentinelLayer(before.item, "beforePane").addTo(map);
     afterLayer = sentinelLayer(after.item, "afterPane").addTo(map);
     showSwipe(niceDate(before.item.properties.datetime), niceDate(after.item.properties.datetime));
@@ -744,23 +785,102 @@ changeToggle.addEventListener("click", function () {
   }
 });
 
-// Makes a map layer that shows one Sentinel-2 photo, using the Planetary
-// Computer's tile service. "visual" is the ready-made true-colour picture.
-// bounds: only load the part inside our area, so the rest of the map stays normal.
-function sentinelLayer(item, pane) {
-  return L.tileLayer(
+// =====================================================
+// 4d. Showing the photos with clear detail
+// =====================================================
+// Sentinel-2's ready-made colour picture ("visual") shows reflectance from 0 to
+// 0.25 and turns anything brighter pure white. Desert sand reflects 0.3 to 0.5,
+// so the desert came out almost white. Instead, we ask the tile service to make
+// the picture from the red, green and blue bands (B04, B03, B02), and tell it
+// which range of values to stretch from black to white ("rescale").
+
+let displayWhite = DEFAULT_DISPLAY_WHITE; // the reflectance shown as white
+
+// Looks at the red, green and blue pixels inside the area in both photos, and
+// finds how bright the brightest 2% are. Both photos use the same white point,
+// so they can be compared fairly, and all three colours use it too, so colours
+// stay natural.
+async function findDisplayWhite(items, area, token) {
+  // Up to about 150 x 150 sample points, at least 20 m apart
+  const widthMetres = map.distance(area.getSouthWest(), area.getSouthEast());
+  const heightMetres = map.distance(area.getSouthWest(), area.getNorthWest());
+  const grid = makeGrid(area, Math.max(20, Math.max(widthMetres, heightMetres) / 150));
+
+  const perPhoto = await Promise.all(
+    items.map(async function (item) {
+      const projected = projectGrid(grid, item);
+      const bands = await Promise.all(
+        ["B04", "B03", "B02"].map(function (band) {
+          return readBandOnGrid(item, band, token, projected);
+        })
+      );
+      const offset = storedOffset(item);
+      const values = [];
+      for (const band of bands) {
+        for (const value of band) {
+          if (value > 0) values.push((value - offset) / 10000); // 0 = no data
+        }
+      }
+      return values;
+    })
+  );
+
+  const all = Float32Array.from(perPhoto.flat()).sort(); // smallest to largest
+  if (all.length === 0) return DEFAULT_DISPLAY_WHITE;
+  const white = all[Math.floor(((all.length - 1) * DISPLAY_BRIGHT_PERCENT) / 100)];
+  return Math.max(white, 0.05); // never closer to black than 0.05, even over dark water
+}
+
+// The web address of a photo's map tiles, using the current brightness range
+function tileUrlFor(item) {
+  // The brightness slider lowers the white point (brighter picture) or raises
+  // it (darker picture). 100% = the automatic white point.
+  const brightness = brightnessSlider.value / 100;
+  const white = displayWhite / brightness;
+  // Turn reflectance back into the numbers stored in this photo's files
+  const offset = storedOffset(item);
+  const toStored = function (reflectance) {
+    return Math.round(reflectance * 10000 + offset);
+  };
+  return (
     TILE_URL +
-      "?collection=sentinel-2-l2a&item=" + item.id +
-      "&assets=visual&asset_bidx=visual%7C1%2C2%2C3&nodata=0",
-    {
-      pane: pane,
-      bounds: chosenArea,
-      maxZoom: 19,
-      maxNativeZoom: 16, // Sentinel-2 pixels are 10 m; closer than this, tiles are just enlarged
-      attribution: "Contains modified Copernicus Sentinel data, via Microsoft Planetary Computer"
-    }
+    "?collection=sentinel-2-l2a&item=" + item.id +
+    "&assets=B04&assets=B03&assets=B02" + // red, green, blue
+    "&nodata=0" +
+    "&rescale=" + toStored(0) + "," + toStored(white) // black, white
   );
 }
+
+// Makes a map layer that shows one Sentinel-2 photo.
+// bounds: only load the part inside our area, so the rest of the map stays normal.
+function sentinelLayer(item, pane) {
+  const layer = L.tileLayer(tileUrlFor(item), {
+    pane: pane,
+    bounds: chosenArea,
+    maxZoom: 19,
+    maxNativeZoom: 16, // Sentinel-2 pixels are 10 m; closer than this, tiles are just enlarged
+    attribution: "Contains modified Copernicus Sentinel data, via Microsoft Planetary Computer"
+  });
+  layer.item = item; // remember which photo it shows, for the brightness slider
+  return layer;
+}
+
+// --- The brightness slider ---
+const brightnessRow = document.getElementById("brightness-row");
+const brightnessSlider = document.getElementById("brightness-slider");
+const brightnessText = document.getElementById("brightness-value");
+
+// While dragging, just show the number
+brightnessSlider.addEventListener("input", function () {
+  brightnessText.textContent = brightnessSlider.value + "%";
+});
+
+// When the slider is let go, redraw both photos with the new brightness
+brightnessSlider.addEventListener("change", function () {
+  for (const layer of [beforeLayer, afterLayer]) {
+    if (layer) layer.setUrl(tileUrlFor(layer.item));
+  }
+});
 
 // Turns "2026-07-31T06:46:29Z" into "31 Jul 2026"
 function niceDate(isoText) {
@@ -783,6 +903,7 @@ function clearComparison() {
   beforeInfo.textContent = "-";
   afterInfo.textContent = "-";
   changeSection.hidden = true;
+  brightnessRow.hidden = true;
   swipeBar.hidden = true;
   swipeLine.hidden = true;
 }

@@ -49,6 +49,12 @@
     <div class="step">
       <div><strong>Before image:</strong> <span id="before-info">-</span></div>
       <div><strong>After image:</strong> <span id="after-info">-</span></div>
+      <!-- Brightness of the Sentinel-2 photos. "hidden" until photos are shown. -->
+      <div id="brightness-row" class="brightness" hidden>
+        <label for="brightness-slider">Brightness</label>
+        <input id="brightness-slider" type="range" min="50" max="200" step="10" value="100">
+        <span id="brightness-value">100%</span>
+      </div>
       <div id="status-text" class="status">Start by choosing an area.</div>
     </div>
 

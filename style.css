@@ -107,6 +107,25 @@ body {
   font-size: 13px;
 }
 
+/* The brightness slider: label, slider and percentage on one line */
+.brightness {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.brightness input {
+  flex: 1; /* the slider takes up the space that's left */
+  min-width: 0;
+}
+
+/* The [hidden] attribute must win over "display: flex" above */
+.brightness[hidden] {
+  display: none;
+}
+
 /* Hide the location status line until there is something to say */
 #locate-status:empty {
   display: none;
