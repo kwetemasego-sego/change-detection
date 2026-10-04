@@ -121,14 +121,13 @@ To keep downloads small, the photo files aren't read directly for this. They sto
 
 ### How well does it work?
 
-Testing on a Masdar City construction site (6 July to 29 September 2026), the blue squares fell on plots being dug and built, and on a new structure visible in the after photo. On places where nothing should change, almost nothing was flagged:
+It was tested on six sites around Abu Dhabi (3 July to 1 October 2026): three with real change and three where nothing changed. **3 were correct, 2 partly correct and 1 wrong.**
 
-| Place | Flagged as new buildings or bare ground |
-|---|---|
-| Masdar City construction site | **2.7%** (real construction) |
-| Al Khalidiyah (finished city neighbourhood) | 0.5% |
-| Fahid Island (natural tidal flats) | 0.6% |
-| Al Shamkha, Shakhbout City (desert suburbs) | 0.0–0.1% |
+- ✅ It found construction and earthworks in the right places (Masdar City, Lulu Island). Finished neighbourhoods stayed under 1% flagged (Al Khalidiyah, Khalifa City A).
+- ⚠️ It **missed a plot covered in bright white fill**, because the built-up score went down instead of up. It also **flagged a solar panel field** at Masdar.
+- ❌ In a park, **lawns greening after the summer** were flagged as plants gained. Compare the same month in two years to avoid seasonal changes.
+
+Full results, pictures and how the sites were chosen: **[VALIDATION.md](VALIDATION.md)**.
 
 All the numbers above are settings at the top of [`main.js`](main.js), so they're easy to adjust.
 
@@ -184,6 +183,8 @@ Then open **http://localhost:8000** in your browser. Press **Ctrl+C** in the ter
 | `style.css` | How everything looks |
 | `main.js` | All the code: map, choosing an area and dates, finding images, reading bands, change detection, time series and timelapse, downloads, swipe slider, place details |
 | `CREDITS.md` | Data sources, libraries and licences |
+| `VALIDATION.md` | Test results on six sites around Abu Dhabi |
+| `docs/validation/` | Before, after and result pictures for each test site |
 | `docs/masdar-result.png` | The screenshot in this README |
 
 The project started as a browser game. That version is kept on the [`game-version`](https://github.com/kwetemasego-sego/change-detection/tree/game-version) branch.
