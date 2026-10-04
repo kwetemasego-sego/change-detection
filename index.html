@@ -20,11 +20,31 @@
 
   <!-- Information panel that floats on top of the map -->
   <div id="info-panel">
+    <div class="mission">Mission: reach Rally Point Alpha 🎯</div>
+    <div>
+      <strong>Health:</strong>
+      <span class="health-bar"><span id="health-fill"></span></span>
+      <span id="health-text">100</span>
+    </div>
+    <div><strong>Enemies left:</strong> <span id="enemies-left">3</span></div>
+    <div><strong>Terrain:</strong> <span id="terrain-text">Land</span></div>
     <div><strong>Soldier:</strong> <span id="soldier-position">-</span></div>
     <div><strong>Target:</strong> <span id="target-info">-</span></div>
     <button id="locate-button" type="button">Locate me</button>
     <div id="locate-status"></div>
-    <div class="hint">Move with the arrow keys, or click the map to walk there.</div>
+    <div class="hint">
+      Arrow keys or click the map to move. Space to attack.<br>
+      Stay out of the red circles. Water slows you down.
+    </div>
+  </div>
+
+  <!-- The end-of-mission message. "hidden" keeps it invisible until the game ends. -->
+  <div id="game-over" hidden>
+    <div class="game-over-box">
+      <h1 id="game-over-title">Mission complete</h1>
+      <p id="game-over-text"></p>
+      <button id="restart-button" type="button">Play again</button>
+    </div>
   </div>
 
   <!-- Details about the place where the soldier is standing -->

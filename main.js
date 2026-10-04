@@ -5,17 +5,35 @@
 // Where the soldier starts: Abu Dhabi, UAE. Latitude first, then longitude.
 const START_LAT = 24.4539;
 const START_LNG = 54.3773;
-const START_ZOOM = 12; // 1 = whole world, 19 = individual buildings
 
 // The place the soldier is trying to reach (on Al Reem Island)
 const TARGET_NAME = "Rally Point Alpha";
 const TARGET_LAT = 24.499;
 const TARGET_LNG = 54.406;
+const TARGET_REACHED_DISTANCE = 100; // metres: this close counts as "arrived"
 
-// How far the soldier moves, measured in screen pixels.
-// Because it's in pixels, zooming in lets you move more precisely.
-const ARROW_STEP_PIXELS = 10; // each arrow-key press
-const WALK_PIXELS_PER_FRAME = 3; // walking speed (about 60 frames per second)
+// The player. Speeds are in metres per second. They are much faster
+// than real life so that crossing the city takes seconds, not hours.
+const PLAYER_SPEED = 300;
+const WATER_SPEED_FACTOR = 0.4; // in water the soldier moves at 40% of normal speed
+const PLAYER_MAX_HEALTH = 100;
+
+// Attacking (press Space)
+const ATTACK_RANGE = 250; // metres
+const ATTACK_DAMAGE = 34; // so an enemy takes 3 hits
+const ATTACK_COOLDOWN_MS = 400; // the soldier can attack at most every 0.4 seconds
+
+// Enemies. Each one walks back and forth (east to west) around its spot.
+const ENEMY_SPOTS = [
+  { lat: 24.4674, lng: 54.3859, startAt: 0 }, // startAt: 0 = west end, 1 = east end
+  { lat: 24.4787, lng: 54.3931, startAt: 0.5 },
+  { lat: 24.49, lng: 54.4003, startAt: 1 }
+];
+const ENEMY_SPEED = 80; // metres per second (slow patrol)
+const ENEMY_PATROL_LENGTH = 1000; // metres from one end of the patrol to the other
+const ENEMY_MAX_HEALTH = 100;
+const ENEMY_DANGER_RANGE = 300; // metres: closer than this and the player gets hurt
+const ENEMY_DAMAGE_PER_SECOND = 20; // health lost per second, for each enemy in range
 
 // How long the soldier must stand still before we look up place details.
 // 1000 milliseconds = 1 second.
@@ -27,7 +45,16 @@ const LOOKUP_DELAY_MS = 1000;
 
 // keyboard: false stops Leaflet using the arrow keys to slide the map,
 // because we want the arrow keys to move the soldier instead.
-const map = L.map("map", { keyboard: false }).setView([START_LAT, START_LNG], START_ZOOM);
+const map = L.map("map", { keyboard: false });
+
+// Zoom so that both the soldier and the target fit on the screen
+map.fitBounds(
+  [
+    [START_LAT, START_LNG],
+    [TARGET_LAT, TARGET_LNG]
+  ],
+  { padding: [60, 60] }
+);
 
 // Esri World Imagery is free to use without an API key,
 // as long as we show the credit (the "attribution") in the corner.
@@ -54,17 +81,20 @@ function emojiIcon(emoji) {
   });
 }
 
+// interactive: false means clicks go "through" the marker to the map,
+// so you can click anywhere (even on a marker) to walk there.
 const soldier = L.marker([START_LAT, START_LNG], {
   icon: emojiIcon("🪖"),
+  interactive: false,
   zIndexOffset: 1000 // draw the soldier on top of other markers
 }).addTo(map);
 
-const target = L.marker([TARGET_LAT, TARGET_LNG], { icon: emojiIcon("🎯") })
+const target = L.marker([TARGET_LAT, TARGET_LNG], { icon: emojiIcon("🎯"), interactive: false })
   .addTo(map)
   .bindTooltip(TARGET_NAME, { permanent: true, direction: "top", offset: [0, -16] });
 
 // =====================================================
-// 3. Distance and compass direction
+// 3. Distances, directions and positions
 // =====================================================
 
 // Turns metres into easy-to-read text, e.g. "850 m" or "3.42 km"
@@ -98,6 +128,29 @@ function compassPoint(degrees) {
   return points[index];
 }
 
+// One degree of latitude is about 111,320 metres everywhere on Earth.
+// One degree of longitude gets shorter towards the poles, so we multiply
+// by cos(latitude). These two helpers are accurate enough over a few km.
+const METRES_PER_DEGREE = 111320;
+
+// Returns the position that is a number of metres north and east of "position"
+function offsetPosition(position, metresNorth, metresEast) {
+  const metresPerDegreeLng = METRES_PER_DEGREE * Math.cos((position.lat * Math.PI) / 180);
+  return L.latLng(
+    position.lat + metresNorth / METRES_PER_DEGREE,
+    position.lng + metresEast / metresPerDegreeLng
+  );
+}
+
+// Returns how many metres north and east "to" is from "from"
+function metresApart(from, to) {
+  const metresPerDegreeLng = METRES_PER_DEGREE * Math.cos((from.lat * Math.PI) / 180);
+  return {
+    north: (to.lat - from.lat) * METRES_PER_DEGREE,
+    east: (to.lng - from.lng) * metresPerDegreeLng
+  };
+}
+
 // =====================================================
 // 4. The information panel
 // =====================================================
@@ -105,6 +158,10 @@ function compassPoint(degrees) {
 const soldierPositionText = document.getElementById("soldier-position");
 const targetInfoText = document.getElementById("target-info");
 const locateStatusText = document.getElementById("locate-status");
+const healthFill = document.getElementById("health-fill");
+const healthText = document.getElementById("health-text");
+const enemiesLeftText = document.getElementById("enemies-left");
+const terrainText = document.getElementById("terrain-text");
 
 function updateInfoPanel() {
   const soldierPos = soldier.getLatLng();
@@ -119,12 +176,23 @@ function updateInfoPanel() {
     formatDistance(metres) + " " + compassPoint(degrees) + " (" + Math.round(degrees) + "°)";
 }
 
-// Fill in the panel straight away when the page loads
-updateInfoPanel();
+function updateHealthDisplay() {
+  const percent = Math.max(0, (playerHealth / PLAYER_MAX_HEALTH) * 100);
+  healthFill.style.width = percent + "%";
+  healthText.textContent = Math.ceil(Math.max(0, playerHealth));
+
+  // Green when healthy, orange when hurt, red when in danger
+  if (percent > 50) healthFill.style.background = "#43a047";
+  else if (percent > 25) healthFill.style.background = "#fb8c00";
+  else healthFill.style.background = "#e53935";
+}
 
 // =====================================================
-// 5. Moving the soldier
+// 5. Moving the player
 // =====================================================
+
+let playerHealth = PLAYER_MAX_HEALTH;
+let gameState = "playing"; // "playing", "won" or "lost"
 
 // Every kind of movement goes through this one function,
 // so the panel is always kept up to date.
@@ -137,66 +205,320 @@ function moveSoldier(newPosition) {
     map.panTo(newPosition);
   }
 
-  // Look up details about this place once the soldier stops (see section 7)
+  // Look up details about this place once the soldier stops (see section 9)
   scheduleLookup();
 }
 
-let walkDestination = null; // where the soldier is walking to (null = standing still)
+// --- Keyboard ---
+// We remember which arrow keys are being held down. The game loop
+// (section 10) moves the soldier smoothly for as long as a key is held.
+const keysDown = {};
 
-// --- Arrow keys ---
 document.addEventListener("keydown", function (event) {
-  let dx = 0; // pixels to move sideways
-  let dy = 0; // pixels to move up or down (on screens, down is positive)
+  if (event.key.startsWith("Arrow")) {
+    event.preventDefault(); // stop the browser doing its own thing with the arrow keys
+    keysDown[event.key] = true;
+  } else if (event.code === "Space") {
+    event.preventDefault(); // stop Space from scrolling or clicking a button
+    if (!event.repeat) {
+      attack(); // holding Space down only attacks once
+    }
+  }
+});
 
-  if (event.key === "ArrowUp") dy = -ARROW_STEP_PIXELS;
-  else if (event.key === "ArrowDown") dy = ARROW_STEP_PIXELS;
-  else if (event.key === "ArrowLeft") dx = -ARROW_STEP_PIXELS;
-  else if (event.key === "ArrowRight") dx = ARROW_STEP_PIXELS;
-  else return; // some other key was pressed, so do nothing
+document.addEventListener("keyup", function (event) {
+  keysDown[event.key] = false;
+});
 
-  event.preventDefault(); // stop the browser doing its own thing with the arrow keys
-  walkDestination = null; // using the keys cancels any walk in progress
-
-  // Convert soldier position -> screen pixels, move it, convert back to lat/lng
-  const pixel = map.latLngToContainerPoint(soldier.getLatLng());
-  const newPixel = pixel.add([dx, dy]);
-  moveSoldier(map.containerPointToLatLng(newPixel));
+// If the window loses focus while a key is held, forget all keys,
+// otherwise the soldier would keep walking by itself.
+window.addEventListener("blur", function () {
+  for (const key in keysDown) {
+    keysDown[key] = false;
+  }
 });
 
 // --- Click to walk ---
+let walkDestination = null; // where the soldier is walking to (null = no click-walk)
+
 map.on("click", function (event) {
   walkDestination = event.latlng;
 });
 
-// This runs about 60 times per second. Each time, if the soldier
-// has somewhere to go, it takes one small step towards it.
-function walkStep() {
-  if (walkDestination) {
-    const here = map.latLngToContainerPoint(soldier.getLatLng());
-    const there = map.latLngToContainerPoint(walkDestination);
-    const pixelsLeft = here.distanceTo(there);
+// Called every frame by the game loop. "seconds" is the time since the
+// last frame (about 1/60 of a second), so the speed is the same on every computer.
+function movePlayer(seconds) {
+  // Which way do the arrow keys point? (+1 / -1 in each direction)
+  let north = 0;
+  let east = 0;
+  if (keysDown.ArrowUp) north = north + 1;
+  if (keysDown.ArrowDown) north = north - 1;
+  if (keysDown.ArrowRight) east = east + 1;
+  if (keysDown.ArrowLeft) east = east - 1;
 
-    if (pixelsLeft <= WALK_PIXELS_PER_FRAME) {
-      // Close enough: finish the walk exactly on the spot that was clicked
-      moveSoldier(walkDestination);
-      walkDestination = null;
-    } else {
-      // Take one step along the straight line from here to there
-      const step = there.subtract(here).multiplyBy(WALK_PIXELS_PER_FRAME / pixelsLeft);
-      moveSoldier(map.containerPointToLatLng(here.add(step)));
-    }
+  if (north !== 0 || east !== 0) {
+    walkDestination = null; // using the keys cancels a click-walk
+  } else if (walkDestination) {
+    // No keys held, so head towards the clicked spot instead
+    const gap = metresApart(soldier.getLatLng(), walkDestination);
+    north = gap.north;
+    east = gap.east;
+  } else {
+    return; // nothing to do: the soldier is standing still
   }
-  requestAnimationFrame(walkStep); // ask the browser to run this again next frame
+
+  const distanceLeft = Math.hypot(north, east); // length of the direction arrow
+  const stepLength = currentSpeed() * seconds; // metres to move this frame
+
+  if (walkDestination && distanceLeft <= stepLength) {
+    // Close enough: finish the walk exactly on the spot that was clicked
+    moveSoldier(walkDestination);
+    walkDestination = null;
+    return;
+  }
+
+  // Dividing by distanceLeft makes the arrow 1 metre long, so moving
+  // diagonally isn't faster than moving straight.
+  moveSoldier(
+    offsetPosition(
+      soldier.getLatLng(),
+      (north / distanceLeft) * stepLength,
+      (east / distanceLeft) * stepLength
+    )
+  );
 }
-walkStep();
+
+function currentSpeed() {
+  if (inWater) {
+    return PLAYER_SPEED * WATER_SPEED_FACTOR;
+  }
+  return PLAYER_SPEED;
+}
+
+// --- Water slows the soldier down ---
+// We use Open-Meteo's elevation data: the sea is at 0 metres, so any spot
+// at 0 m or lower counts as water. We split the map into small squares
+// (about 200 m across) and remember the answer for each square, so we only
+// ask the internet once per square instead of 60 times a second.
+const WATER_GRID_SIZE = 0.002; // degrees of latitude/longitude (about 200 m)
+const waterMemory = {}; // e.g. waterMemory["12230,27189"] = true (water) or false (land)
+let inWater = false;
+
+function checkWater() {
+  const pos = soldier.getLatLng();
+  const row = Math.round(pos.lat / WATER_GRID_SIZE);
+  const column = Math.round(pos.lng / WATER_GRID_SIZE);
+  const squareName = row + "," + column;
+
+  if (waterMemory[squareName] === true || waterMemory[squareName] === false) {
+    // We already know this square
+    inWater = waterMemory[squareName];
+  } else if (waterMemory[squareName] !== "checking") {
+    // A new square: ask once, and keep the old answer until the reply arrives
+    waterMemory[squareName] = "checking";
+    const lat = (row * WATER_GRID_SIZE).toFixed(4);
+    const lng = (column * WATER_GRID_SIZE).toFixed(4);
+    fetchJson("https://api.open-meteo.com/v1/elevation?latitude=" + lat + "&longitude=" + lng)
+      .then(function (data) {
+        waterMemory[squareName] = data.elevation[0] <= 0;
+      })
+      .catch(function () {
+        waterMemory[squareName] = false; // if the check fails, treat it as land
+      });
+  }
+
+  terrainText.textContent = inWater ? "Water (moving slowly)" : "Land";
+}
 
 // =====================================================
-// 6. "Locate me" button: show the player's real location
+// 6. Enemies
+// =====================================================
+
+// Enemy markers are a red-tinted helmet with a small health bar underneath
+const enemyIcon = L.divIcon({
+  html:
+    '<div class="enemy-emoji">🪖</div>' +
+    '<div class="enemy-health"><div class="enemy-health-fill"></div></div>',
+  className: "enemy-icon",
+  iconSize: [32, 38],
+  iconAnchor: [16, 16]
+});
+
+// Build one enemy object for each spot in the settings
+const enemies = [];
+for (const spot of ENEMY_SPOTS) {
+  const centre = L.latLng(spot.lat, spot.lng);
+  const enemy = {
+    westEnd: offsetPosition(centre, 0, -ENEMY_PATROL_LENGTH / 2),
+    eastEnd: offsetPosition(centre, 0, ENEMY_PATROL_LENGTH / 2),
+    progress: spot.startAt, // 0 = at the west end, 1 = at the east end
+    direction: 1, // 1 = walking east, -1 = walking west
+    health: ENEMY_MAX_HEALTH,
+    alive: true
+  };
+  const position = enemyPosition(enemy);
+  enemy.marker = L.marker(position, { icon: enemyIcon, interactive: false }).addTo(map);
+
+  // A faint red circle shows how close is too close
+  enemy.dangerZone = L.circle(position, {
+    radius: ENEMY_DANGER_RANGE,
+    color: "#e53935",
+    weight: 1,
+    fillOpacity: 0.1,
+    interactive: false
+  }).addTo(map);
+
+  enemies.push(enemy);
+}
+
+// Where along its patrol line an enemy is (progress 0 = west end, 1 = east end)
+function enemyPosition(enemy) {
+  return L.latLng(
+    enemy.westEnd.lat + (enemy.eastEnd.lat - enemy.westEnd.lat) * enemy.progress,
+    enemy.westEnd.lng + (enemy.eastEnd.lng - enemy.westEnd.lng) * enemy.progress
+  );
+}
+
+function enemiesAlive() {
+  return enemies.filter(function (enemy) {
+    return enemy.alive;
+  });
+}
+
+// Called every frame: each enemy takes a small step along its patrol,
+// turning around when it reaches either end.
+function moveEnemies(seconds) {
+  for (const enemy of enemiesAlive()) {
+    enemy.progress = enemy.progress + (enemy.direction * ENEMY_SPEED * seconds) / ENEMY_PATROL_LENGTH;
+
+    if (enemy.progress >= 1) {
+      enemy.progress = 1;
+      enemy.direction = -1; // reached the east end: turn around
+    } else if (enemy.progress <= 0) {
+      enemy.progress = 0;
+      enemy.direction = 1; // reached the west end: turn around
+    }
+
+    const position = enemyPosition(enemy);
+    enemy.marker.setLatLng(position);
+    enemy.dangerZone.setLatLng(position);
+  }
+}
+
+// Called every frame: the player loses health for each enemy that is too close
+function hurtPlayerIfNearEnemies(seconds) {
+  let enemiesTooClose = 0;
+  for (const enemy of enemiesAlive()) {
+    if (map.distance(soldier.getLatLng(), enemy.marker.getLatLng()) < ENEMY_DANGER_RANGE) {
+      enemiesTooClose = enemiesTooClose + 1;
+    }
+  }
+
+  // Make the soldier glow red while being hurt
+  soldier.getElement().classList.toggle("hurt", enemiesTooClose > 0);
+
+  if (enemiesTooClose > 0) {
+    playerHealth = playerHealth - ENEMY_DAMAGE_PER_SECOND * enemiesTooClose * seconds;
+    updateHealthDisplay();
+    if (playerHealth <= 0) {
+      endMission(false);
+    }
+  }
+}
+
+// --- Attacking (Space) ---
+let lastAttackTime = 0;
+
+function attack() {
+  if (gameState !== "playing") return;
+
+  // Don't allow attacks faster than the cooldown
+  const now = performance.now();
+  if (now - lastAttackTime < ATTACK_COOLDOWN_MS) return;
+  lastAttackTime = now;
+
+  showAttackFlash();
+
+  for (const enemy of enemiesAlive()) {
+    if (map.distance(soldier.getLatLng(), enemy.marker.getLatLng()) <= ATTACK_RANGE) {
+      enemy.health = enemy.health - ATTACK_DAMAGE;
+
+      // Shrink the enemy's little health bar
+      const fill = enemy.marker.getElement().querySelector(".enemy-health-fill");
+      fill.style.width = Math.max(0, enemy.health) + "%";
+
+      if (enemy.health <= 0) {
+        // Defeated: remove the enemy and its danger circle from the map
+        enemy.alive = false;
+        enemy.marker.remove();
+        enemy.dangerZone.remove();
+      }
+    }
+  }
+  enemiesLeftText.textContent = enemiesAlive().length;
+}
+
+// A quick yellow circle shows the reach of the attack
+function showAttackFlash() {
+  const flash = L.circle(soldier.getLatLng(), {
+    radius: ATTACK_RANGE,
+    color: "#ffeb3b",
+    weight: 2,
+    fillOpacity: 0.25,
+    interactive: false
+  }).addTo(map);
+
+  setTimeout(function () {
+    flash.remove();
+  }, 150); // remove it after 0.15 seconds
+}
+
+// =====================================================
+// 7. Winning, losing and restarting
+// =====================================================
+
+function checkMissionComplete() {
+  if (map.distance(soldier.getLatLng(), target.getLatLng()) <= TARGET_REACHED_DISTANCE) {
+    endMission(true);
+  }
+}
+
+function endMission(won) {
+  if (gameState !== "playing") return; // the mission has already ended
+
+  gameState = won ? "won" : "lost";
+  walkDestination = null;
+
+  const defeated = enemies.length - enemiesAlive().length;
+  if (won) {
+    document.getElementById("game-over-title").textContent = "Mission complete";
+    document.getElementById("game-over-text").textContent =
+      "You reached " + TARGET_NAME + " with " + Math.ceil(playerHealth) + " health left and defeated " +
+      defeated + " of " + enemies.length + " enemies.";
+  } else {
+    const metresLeft = map.distance(soldier.getLatLng(), target.getLatLng());
+    document.getElementById("game-over-title").textContent = "Mission failed";
+    document.getElementById("game-over-text").textContent =
+      "You were defeated " + formatDistance(metresLeft) + " from " + TARGET_NAME + ".";
+  }
+
+  document.getElementById("game-over").hidden = false; // show the message box
+}
+
+// Restarting simply reloads the page, which puts everything back to the start
+document.getElementById("restart-button").addEventListener("click", function () {
+  location.reload();
+});
+
+// =====================================================
+// 8. "Locate me" button: show the player's real location
 // =====================================================
 
 let myLocationMarker = null; // the blue dot, created the first time we find you
 
 document.getElementById("locate-button").addEventListener("click", function () {
+  this.blur(); // un-focus the button, so pressing Space attacks instead of clicking it again
+
   if (!navigator.geolocation) {
     locateStatusText.textContent = "Sorry, this browser can't detect your location.";
     return;
@@ -241,7 +563,7 @@ function showLocationError(error) {
 }
 
 // =====================================================
-// 7. Place details: elevation, weather, climate, soil,
+// 9. Place details: elevation, weather, climate, soil,
 //    land cover and wildlife where the soldier is standing
 // =====================================================
 // All of these are free websites that need no API key.
@@ -482,5 +804,32 @@ async function getSpeciesName(speciesId) {
   }
 }
 
-// Look up the starting position as soon as the page loads
+// =====================================================
+// 10. Start the game
+// =====================================================
+
+// The game loop runs about 60 times per second. Each time ("frame") it
+// moves everything a little and checks whether the mission has ended.
+let lastFrameTime = performance.now();
+
+function gameLoop(now) {
+  // Seconds since the last frame. Capped at 0.1 so that if the browser tab
+  // was hidden for a while, nothing jumps a huge distance when you come back.
+  const seconds = Math.min((now - lastFrameTime) / 1000, 0.1);
+  lastFrameTime = now;
+
+  if (gameState === "playing") {
+    checkWater();
+    movePlayer(seconds);
+    moveEnemies(seconds);
+    hurtPlayerIfNearEnemies(seconds);
+    checkMissionComplete();
+  }
+
+  requestAnimationFrame(gameLoop); // ask the browser to run this again next frame
+}
+
+updateInfoPanel();
+updateHealthDisplay();
 lookUpPlace();
+requestAnimationFrame(gameLoop);

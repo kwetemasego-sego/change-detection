@@ -29,6 +29,29 @@ body {
   font-variant-numeric: tabular-nums; /* stops numbers jiggling as they change */
 }
 
+.mission {
+  font-weight: bold;
+  margin-bottom: 2px;
+}
+
+/* The player's health bar: a grey track with a coloured fill inside */
+.health-bar {
+  display: inline-block;
+  width: 100px;
+  height: 10px;
+  background: #ddd;
+  border-radius: 5px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+#health-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #43a047; /* JavaScript changes this to orange or red as health drops */
+}
+
 #locate-button {
   margin-top: 6px;
   padding: 4px 10px;
@@ -105,4 +128,76 @@ body {
   line-height: 32px;
   text-align: center;
   filter: drop-shadow(0 0 3px white); /* a soft white glow so markers stand out on the imagery */
+}
+
+/* While an enemy is hurting the player, the soldier glows red */
+.emoji-icon.hurt {
+  filter: drop-shadow(0 0 4px red) drop-shadow(0 0 4px red);
+}
+
+/* Enemies: a helmet on a red badge, with a health bar below */
+.enemy-icon {
+  text-align: center;
+}
+
+.enemy-emoji {
+  width: 28px;
+  height: 28px;
+  margin: 0 auto;
+  font-size: 18px;
+  line-height: 28px;
+  background: #e53935;
+  border: 2px solid white;
+  border-radius: 50%; /* turns the square into a circle */
+  box-sizing: border-box;
+}
+
+.enemy-health {
+  width: 28px;
+  height: 4px;
+  margin: 2px auto 0;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.enemy-health-fill {
+  width: 100%;
+  height: 100%;
+  background: #e53935;
+}
+
+/* The end-of-mission message covers the whole screen with a dark layer */
+#game-over {
+  position: fixed;
+  inset: 0; /* stretch to all four edges of the window */
+  z-index: 2000; /* above the map and the panels */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+/* Without this, "display: flex" above would beat the "hidden" attribute */
+#game-over[hidden] {
+  display: none;
+}
+
+.game-over-box {
+  max-width: calc(100% - 40px);
+  box-sizing: border-box;
+  padding: 24px 32px;
+  background: white;
+  border-radius: 12px;
+  text-align: center;
+}
+
+.game-over-box h1 {
+  margin: 0 0 8px;
+}
+
+#restart-button {
+  padding: 8px 20px;
+  font-size: 16px;
+  cursor: pointer;
 }
