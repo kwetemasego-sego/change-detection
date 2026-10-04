@@ -52,10 +52,18 @@ body {
   background: #43a047; /* JavaScript changes this to orange or red as health drops */
 }
 
-#locate-button {
+/* The row of buttons in the panel. flex-wrap lets them wrap onto
+   a second line on narrow screens such as phones. */
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-top: 6px;
+}
+
+.buttons button {
   padding: 4px 10px;
-  font-size: 14px;
+  font-size: 13px;
   cursor: pointer;
 }
 
@@ -130,9 +138,21 @@ body {
   filter: drop-shadow(0 0 3px white); /* a soft white glow so markers stand out on the imagery */
 }
 
-/* While an enemy is hurting the player, the soldier glows red */
-.emoji-icon.hurt {
-  filter: drop-shadow(0 0 4px red) drop-shadow(0 0 4px red);
+/* The player's soldier: a helmet on a green badge */
+.player-icon {
+  font-size: 18px;
+  line-height: 26px;
+  text-align: center;
+  background: #43a047;
+  border: 2px solid white;
+  border-radius: 50%; /* turns the square into a circle */
+  box-sizing: border-box;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+/* While an enemy is hurting the player, a red ring appears around the badge */
+.player-icon.hurt {
+  box-shadow: 0 0 0 4px #e53935;
 }
 
 /* Enemies: a helmet on a red badge, with a health bar below */

@@ -2,38 +2,46 @@
 // SETTINGS: change these numbers to tweak the game
 // =====================================================
 
-// Where the soldier starts: Abu Dhabi, UAE. Latitude first, then longitude.
-const START_LAT = 24.4539;
-const START_LNG = 54.3773;
+// The mission takes place in Al Khalidiyah, a neighbourhood of Abu Dhabi.
+// Latitude first, then longitude.
 
-// The place the soldier is trying to reach (on Al Reem Island)
+// Where the soldier starts: the corner of Wrayq Street and Ash Shoulah Street
+const START_LAT = 24.4691;
+const START_LNG = 54.34125;
+const START_ZOOM = 18; // 18-19 is street level
+
+// The place the soldier is trying to reach: Khalidiya Garden, about 425 m east
 const TARGET_NAME = "Rally Point Alpha";
-const TARGET_LAT = 24.499;
-const TARGET_LNG = 54.406;
-const TARGET_REACHED_DISTANCE = 100; // metres: this close counts as "arrived"
+const TARGET_PLACE = "Khalidiya Garden";
+const TARGET_LAT = 24.46883;
+const TARGET_LNG = 54.34544;
+const TARGET_REACHED_DISTANCE = 15; // metres: this close counts as "arrived"
 
-// The player. Speeds are in metres per second. They are much faster
-// than real life so that crossing the city takes seconds, not hours.
-const PLAYER_SPEED = 300;
+// The player. Real-life speeds, in metres per second.
+const WALK_SPEED = 1.5; // a normal walking pace
+const RUN_SPEED = 5; // running (hold Shift)
 const WATER_SPEED_FACTOR = 0.4; // in water the soldier moves at 40% of normal speed
 const PLAYER_MAX_HEALTH = 100;
 
 // Attacking (press Space)
-const ATTACK_RANGE = 250; // metres
+const ATTACK_RANGE = 20; // metres
 const ATTACK_DAMAGE = 34; // so an enemy takes 3 hits
 const ATTACK_COOLDOWN_MS = 400; // the soldier can attack at most every 0.4 seconds
 
-// Enemies. Each one walks back and forth (east to west) around its spot.
-const ENEMY_SPOTS = [
-  { lat: 24.4674, lng: 54.3859, startAt: 0 }, // startAt: 0 = west end, 1 = east end
-  { lat: 24.4787, lng: 54.3931, startAt: 0.5 },
-  { lat: 24.49, lng: 54.4003, startAt: 1 }
+// Enemies. Each one walks back and forth between two points ("from" and "to").
+// startAt says where it begins: 0 = at "from", 1 = at "to", 0.5 = halfway.
+const ENEMY_PATROLS = [
+  // On Zayed The First Street, which crosses the route
+  { from: [24.46865, 54.34204], to: [24.46933, 54.34288], startAt: 0.5 },
+  // In the block between Zayed The First Street and the garden
+  { from: [24.46935, 54.3436], to: [24.46865, 54.34428], startAt: 0 },
+  // Inside the garden, crossing the path about 50 m west of the rally point
+  { from: [24.46935, 54.34492], to: [24.46835, 54.345], startAt: 1 }
 ];
-const ENEMY_SPEED = 80; // metres per second (slow patrol)
-const ENEMY_PATROL_LENGTH = 1000; // metres from one end of the patrol to the other
+const ENEMY_SPEED = 1.2; // metres per second (a slow patrol walk)
 const ENEMY_MAX_HEALTH = 100;
-const ENEMY_DANGER_RANGE = 300; // metres: closer than this and the player gets hurt
-const ENEMY_DAMAGE_PER_SECOND = 20; // health lost per second, for each enemy in range
+const ENEMY_DANGER_RANGE = 25; // metres: closer than this and the player gets hurt
+const ENEMY_DAMAGE_PER_SECOND = 8; // health lost per second, for each enemy in range
 
 // How long the soldier must stand still before we look up place details.
 // 1000 milliseconds = 1 second.
@@ -43,29 +51,83 @@ const LOOKUP_DELAY_MS = 1000;
 // 1. Create the map with satellite imagery
 // =====================================================
 
-// keyboard: false stops Leaflet using the arrow keys to slide the map,
-// because we want the arrow keys to move the soldier instead.
-const map = L.map("map", { keyboard: false });
+const map = L.map("map", {
+  keyboard: false, // stops Leaflet using the arrow keys to slide the map (they move the soldier)
+  maxZoom: 19, // the deepest zoom the map pictures have here (street level)
+  scrollWheelZoom: "center", // zoom towards the middle of the screen, where the soldier is
+  doubleClickZoom: "center",
+  touchZoom: "center"
+}).setView([START_LAT, START_LNG], START_ZOOM);
 
-// Zoom so that both the soldier and the target fit on the screen
-map.fitBounds(
-  [
-    [START_LAT, START_LNG],
-    [TARGET_LAT, TARGET_LNG]
-  ],
-  { padding: [60, 60] }
-);
+// All map pictures ("tiles") come from Esri's free servers: no API key needed,
+// as long as we show the credits (the "attribution") in the corner.
+const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/";
 
-// Esri World Imagery is free to use without an API key,
-// as long as we show the credit (the "attribution") in the corner.
-L.tileLayer(
-  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-  {
-    maxZoom: 19,
-    attribution:
-      "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community"
+// --- Satellite view: photos, with see-through label layers on top ---
+const satellitePhotos = L.tileLayer(ESRI + "World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+  maxZoom: 19,
+  attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics"
+});
+// Roads and street names
+const streetLabels = L.tileLayer(ESRI + "Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", {
+  maxZoom: 19,
+  attribution: "Labels &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors"
+});
+// City and neighbourhood names
+const placeLabels = L.tileLayer(ESRI + "Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {
+  maxZoom: 19
+});
+// A layer group lets us show or hide all three together
+const satelliteView = L.layerGroup([satellitePhotos, streetLabels, placeLabels]);
+
+// --- Street map view: a normal drawn map ---
+const streetMapView = L.tileLayer(ESRI + "World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
+  maxZoom: 19,
+  attribution: "Map &copy; Esri, HERE, Garmin, USGS, &copy; OpenStreetMap contributors"
+});
+
+satelliteView.addTo(map); // start with the satellite view
+
+// The "Street map / Satellite" button swaps one view for the other
+const mapViewButton = document.getElementById("map-view-button");
+let showingSatellite = true;
+
+mapViewButton.addEventListener("click", function () {
+  this.blur(); // un-focus the button, so pressing Space attacks instead of clicking it again
+  if (showingSatellite) {
+    map.removeLayer(satelliteView);
+    streetMapView.addTo(map);
+    mapViewButton.textContent = "Show satellite";
+  } else {
+    map.removeLayer(streetMapView);
+    satelliteView.addTo(map);
+    mapViewButton.textContent = "Show street map";
   }
-).addTo(map);
+  showingSatellite = !showingSatellite;
+});
+
+// --- Camera follow ---
+// When this is on, the map keeps the soldier in the middle of the screen.
+const followButton = document.getElementById("follow-button");
+let cameraFollows = true;
+
+function setCameraFollow(on) {
+  cameraFollows = on;
+  followButton.textContent = on ? "Camera follow: on" : "Camera follow: off";
+  if (on) {
+    map.panTo(soldier.getLatLng());
+  }
+}
+
+followButton.addEventListener("click", function () {
+  this.blur();
+  setCameraFollow(!cameraFollows);
+});
+
+// Dragging the map means you want to look around, so stop following
+map.on("dragstart", function () {
+  setCameraFollow(false);
+});
 
 // =====================================================
 // 2. Add the soldier and the target to the map
@@ -81,17 +143,29 @@ function emojiIcon(emoji) {
   });
 }
 
+// The player's soldier: a helmet on a green badge, so it stands out on busy streets
+const playerIcon = L.divIcon({
+  html: "🪖",
+  className: "player-icon",
+  iconSize: [30, 30],
+  iconAnchor: [15, 15]
+});
+
 // interactive: false means clicks go "through" the marker to the map,
 // so you can click anywhere (even on a marker) to walk there.
 const soldier = L.marker([START_LAT, START_LNG], {
-  icon: emojiIcon("🪖"),
+  icon: playerIcon,
   interactive: false,
   zIndexOffset: 1000 // draw the soldier on top of other markers
 }).addTo(map);
 
 const target = L.marker([TARGET_LAT, TARGET_LNG], { icon: emojiIcon("🎯"), interactive: false })
   .addTo(map)
-  .bindTooltip(TARGET_NAME, { permanent: true, direction: "top", offset: [0, -16] });
+  .bindTooltip(TARGET_NAME + " (" + TARGET_PLACE + ")", {
+    permanent: true,
+    direction: "right", // to the right, so the label doesn't hide the enemies to the west
+    offset: [16, 0]
+  });
 
 // =====================================================
 // 3. Distances, directions and positions
@@ -161,7 +235,7 @@ const locateStatusText = document.getElementById("locate-status");
 const healthFill = document.getElementById("health-fill");
 const healthText = document.getElementById("health-text");
 const enemiesLeftText = document.getElementById("enemies-left");
-const terrainText = document.getElementById("terrain-text");
+const movementText = document.getElementById("movement-text");
 
 function updateInfoPanel() {
   const soldierPos = soldier.getLatLng();
@@ -200,9 +274,9 @@ function moveSoldier(newPosition) {
   soldier.setLatLng(newPosition);
   updateInfoPanel();
 
-  // If the soldier walks off the edge of the screen, slide the map to follow
-  if (!map.getBounds().contains(newPosition)) {
-    map.panTo(newPosition);
+  // Keep the camera centred on the soldier (unless camera follow is off)
+  if (cameraFollows) {
+    map.panTo(newPosition, { animate: false });
   }
 
   // Look up details about this place once the soldier stops (see section 9)
@@ -210,14 +284,16 @@ function moveSoldier(newPosition) {
 }
 
 // --- Keyboard ---
-// We remember which arrow keys are being held down. The game loop
-// (section 10) moves the soldier smoothly for as long as a key is held.
+// We remember which keys are being held down (arrows, and Shift for running).
+// The game loop (section 10) moves the soldier for as long as a key is held.
 const keysDown = {};
 
 document.addEventListener("keydown", function (event) {
   if (event.key.startsWith("Arrow")) {
     event.preventDefault(); // stop the browser doing its own thing with the arrow keys
     keysDown[event.key] = true;
+  } else if (event.key === "Shift") {
+    keysDown.Shift = true;
   } else if (event.code === "Space") {
     event.preventDefault(); // stop Space from scrolling or clicking a button
     if (!event.repeat) {
@@ -264,8 +340,11 @@ function movePlayer(seconds) {
     north = gap.north;
     east = gap.east;
   } else {
-    return; // nothing to do: the soldier is standing still
+    showMovement("Standing", 0); // nothing to do: the soldier is standing still
+    return;
   }
+
+  showMovement(keysDown.Shift ? "Running" : "Walking", currentSpeed());
 
   const distanceLeft = Math.hypot(north, east); // length of the direction arrow
   const stepLength = currentSpeed() * seconds; // metres to move this frame
@@ -288,19 +367,30 @@ function movePlayer(seconds) {
   );
 }
 
+// Speed in metres per second: running if Shift is held, slower in water
 function currentSpeed() {
+  let speed = keysDown.Shift ? RUN_SPEED : WALK_SPEED;
   if (inWater) {
-    return PLAYER_SPEED * WATER_SPEED_FACTOR;
+    speed = speed * WATER_SPEED_FACTOR;
   }
-  return PLAYER_SPEED;
+  return speed;
+}
+
+// Shows e.g. "Running on land, 5.0 m/s" in the panel
+function showMovement(action, speed) {
+  let text = action + (inWater ? " in water" : " on land");
+  if (speed > 0) {
+    text = text + ", " + speed.toFixed(1) + " m/s";
+  }
+  movementText.textContent = text;
 }
 
 // --- Water slows the soldier down ---
 // We use Open-Meteo's elevation data: the sea is at 0 metres, so any spot
 // at 0 m or lower counts as water. We split the map into small squares
-// (about 200 m across) and remember the answer for each square, so we only
+// (about 50 m across) and remember the answer for each square, so we only
 // ask the internet once per square instead of 60 times a second.
-const WATER_GRID_SIZE = 0.002; // degrees of latitude/longitude (about 200 m)
+const WATER_GRID_SIZE = 0.0005; // degrees of latitude/longitude (about 50 m)
 const waterMemory = {}; // e.g. waterMemory["12230,27189"] = true (water) or false (land)
 let inWater = false;
 
@@ -326,8 +416,6 @@ function checkWater() {
         waterMemory[squareName] = false; // if the check fails, treat it as land
       });
   }
-
-  terrainText.textContent = inWater ? "Water (moving slowly)" : "Land";
 }
 
 // =====================================================
@@ -344,15 +432,17 @@ const enemyIcon = L.divIcon({
   iconAnchor: [16, 16]
 });
 
-// Build one enemy object for each spot in the settings
+// Build one enemy object for each patrol in the settings
 const enemies = [];
-for (const spot of ENEMY_SPOTS) {
-  const centre = L.latLng(spot.lat, spot.lng);
+for (const patrol of ENEMY_PATROLS) {
+  const from = L.latLng(patrol.from);
+  const to = L.latLng(patrol.to);
   const enemy = {
-    westEnd: offsetPosition(centre, 0, -ENEMY_PATROL_LENGTH / 2),
-    eastEnd: offsetPosition(centre, 0, ENEMY_PATROL_LENGTH / 2),
-    progress: spot.startAt, // 0 = at the west end, 1 = at the east end
-    direction: 1, // 1 = walking east, -1 = walking west
+    from: from,
+    to: to,
+    patrolLength: map.distance(from, to), // in metres
+    progress: patrol.startAt, // 0 = at "from", 1 = at "to"
+    direction: 1, // 1 = walking towards "to", -1 = walking back towards "from"
     health: ENEMY_MAX_HEALTH,
     alive: true
   };
@@ -371,11 +461,11 @@ for (const spot of ENEMY_SPOTS) {
   enemies.push(enemy);
 }
 
-// Where along its patrol line an enemy is (progress 0 = west end, 1 = east end)
+// Where along its patrol line an enemy is (progress 0 = at "from", 1 = at "to")
 function enemyPosition(enemy) {
   return L.latLng(
-    enemy.westEnd.lat + (enemy.eastEnd.lat - enemy.westEnd.lat) * enemy.progress,
-    enemy.westEnd.lng + (enemy.eastEnd.lng - enemy.westEnd.lng) * enemy.progress
+    enemy.from.lat + (enemy.to.lat - enemy.from.lat) * enemy.progress,
+    enemy.from.lng + (enemy.to.lng - enemy.from.lng) * enemy.progress
   );
 }
 
@@ -389,14 +479,14 @@ function enemiesAlive() {
 // turning around when it reaches either end.
 function moveEnemies(seconds) {
   for (const enemy of enemiesAlive()) {
-    enemy.progress = enemy.progress + (enemy.direction * ENEMY_SPEED * seconds) / ENEMY_PATROL_LENGTH;
+    enemy.progress = enemy.progress + (enemy.direction * ENEMY_SPEED * seconds) / enemy.patrolLength;
 
     if (enemy.progress >= 1) {
       enemy.progress = 1;
-      enemy.direction = -1; // reached the east end: turn around
+      enemy.direction = -1; // reached "to": turn around
     } else if (enemy.progress <= 0) {
       enemy.progress = 0;
-      enemy.direction = 1; // reached the west end: turn around
+      enemy.direction = 1; // reached "from": turn around
     }
 
     const position = enemyPosition(enemy);
@@ -553,6 +643,7 @@ function showMyLocation(position) {
     .addTo(map)
     .bindTooltip("You are here");
 
+  setCameraFollow(false); // otherwise the camera would jump back to the soldier
   map.setView([lat, lng], 15);
   locateStatusText.textContent =
     "You: " + lat.toFixed(5) + ", " + lng.toFixed(5) + " (±" + Math.round(accuracy) + " m)";
