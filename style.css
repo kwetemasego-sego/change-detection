@@ -203,25 +203,114 @@ details p {
   image-rendering: pixelated;
 }
 
-/* --- "Zoom out for a clearer image" note, at the top middle of the map --- */
-#zoom-note {
+/* --- Notes at the top middle of the map: the timelapse date and "Zoom out..." --- */
+#map-notes {
   position: absolute;
   top: 12px;
   left: 50%;
-  transform: translateX(-50%); /* centres the note */
+  transform: translateX(-50%); /* centres the notes */
   z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none; /* clicks go through them to the map */
+}
+
+#frame-date,
+#zoom-note {
   padding: 6px 12px;
   background: rgba(255, 255, 255, 0.94);
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   font-size: 13px;
   white-space: nowrap;
-  pointer-events: none; /* clicks go through it to the map */
 }
 
+#frame-date {
+  font-size: 16px;
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
+}
+
+#frame-date[hidden],
 #zoom-note[hidden] {
   display: none;
 }
+
+/* --- The time series chart (section 4 of the panel) --- */
+#series-progress {
+  width: 100%;
+  margin-top: 4px;
+}
+
+#series-progress[hidden],
+#series-player[hidden] {
+  display: none;
+}
+
+#series-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 6px;
+}
+
+#series-chart .grid {
+  stroke: #e3e3e3;
+  stroke-width: 1;
+}
+
+#series-chart .grid.zero {
+  stroke: #b5b5b5;
+}
+
+#series-chart .axis-label {
+  font-size: 10px;
+  fill: #666;
+}
+
+/* A white ring around each dot keeps overlapping dots apart */
+#series-chart .dot {
+  stroke: white;
+  stroke-width: 2;
+}
+
+/* The line showing which image is on the map */
+#series-chart .frame-marker {
+  stroke: #333;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+/* The invisible hover/click strips */
+#series-chart .hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+#series-chart .hit:hover {
+  fill: rgba(0, 0, 0, 0.05);
+}
+
+.series-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+/* A short line in each score's colour, matching the chart */
+.line-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 3px;
+  margin-right: 6px;
+  vertical-align: middle;
+  border-radius: 2px;
+}
+
+.line-swatch.ndvi { background: #2a78d6; }
+.line-swatch.ndbi { background: #eb6834; }
 
 /* --- The before/after swipe slider, at the bottom middle of the screen --- */
 #swipe-bar {

@@ -27,6 +27,10 @@ It runs entirely in your web browser. There is no server and no API key: it is j
    - **Place details** for the centre of your area: elevation, weather, climate, soil, land cover and wildlife.
 5. **Drag the slider** at the bottom to swipe between the before photo (left of the line) and the after photo (right of the line).
 6. **Press Hide changes** to see the photos without the coloured squares, and **Show changes** to bring them back.
+7. **Over time**: after the changes, the panel looks for a clear photo about every 2 weeks between your two dates and charts the area's average **plant score (NDVI)** and **built-up score (NDBI)**.
+   - **Click a point** on the chart to show that photo on the map, with its date at the top.
+   - **Press Play** for a timelapse of all the photos in date order. **Speed** sets how long each one stays on screen.
+   - **Back to before/after**, or moving the swipe slider, returns to the before/after comparison.
 
 Tips:
 
@@ -106,6 +110,12 @@ Some things change the scores without anything really changing, so these squares
 
 Real changes, like a building site or a cleared field, cover a patch of ground. A single changed square on its own is usually just noise. So **a changed square only stays if at least 2 of its 8 neighbours changed the same way.**
 
+### 6. The time series
+
+One catalogue search finds every photo between the two dates. Only photos from the **same satellite path and tile as the before photo** are kept, so they all line up. The dates are split into 2-week periods (longer for ranges over about 2 years, so there are never more than 60). In each period, up to 3 of the least cloudy photos are tried in turn. The first with **at most 10% of the area hidden** by cloud, shadow or missing data (the same scene-classification check as above) is used. Its averages leave out skipped squares and water.
+
+To keep downloads small, the photo files aren't read directly for this. They store pixels in blocks about 10 km across, so even a small area would cost about 2 MB per photo. Instead Planetary Computer cuts out just the area, sampled at up to 100 × 100 points with all five bands in one small file (about 120 KB). A year of photos over a 2 km area is about 3.5 MB.
+
 ### How well does it work?
 
 Testing on a Masdar City construction site (6 July to 29 September 2026), the blue squares fell on plots being dug and built, and on a new structure visible in the after photo. On places where nothing should change, almost nothing was flagged:
@@ -140,11 +150,12 @@ Sentinel-2 images contain modified Copernicus Sentinel data. Licences and full c
 
 ## Limits
 
-- **Small things are missed.** Sentinel-2's sharpest pixels are 10 m across, and a change needs a small patch of squares, so anything smaller than about 20 m (a single villa, say) won't show. Zoomed in to street level, the photos look blocky for the same reason.
+- **Small things are missed.** Sentinel-2's sharpest pixels are 10 m across, and a change needs a small patch of squares, so anything smaller than about 20 m (a single villa, say) won't show. Zoomed in to street level, the photos look blurry for the same reason.
 - **Water change and land reclamation aren't detected.** Shorelines are left out because tides make them unreliable over short periods.
 - **Tall towers can cause a little false blue** at their feet as shadows change with the seasons (about 0.5% in a dense neighbourhood in testing).
 - **Areas up to 10 km × 10 km** for change detection. Larger areas would download too much data into the browser.
 - **The cloud check only uses the 6 most promising photos** near each date. If they are all cloudy over your area, try other dates.
+- **The time series is an average over the whole area**, so a building site that covers a small part of it only moves the lines a little. Draw the area tightly around the place you're interested in.
 - **It depends on free public services.** If Planetary Computer, Open-Meteo, SoilGrids, Overpass or GBIF are busy or down, that part shows a message or "Not available" while the rest keeps working. Planetary Computer's tile service is meant for exploring data and limits how many requests it accepts.
 - **It's a quick visual guide, not a survey.** Always check the before and after photos with the slider before drawing conclusions.
 
@@ -168,7 +179,7 @@ Then open **http://localhost:8000** in your browser. Press **Ctrl+C** in the ter
 |---|---|
 | `index.html` | The page: map, control panel, slider and place details panel |
 | `style.css` | How everything looks |
-| `main.js` | All the code: map, choosing an area and dates, finding images, reading bands, change detection, swipe slider, place details |
+| `main.js` | All the code: map, choosing an area and dates, finding images, reading bands, change detection, time series and timelapse, swipe slider, place details |
 | `CREDITS.md` | Data sources, libraries and licences |
 | `docs/masdar-result.png` | The screenshot in this README |
 

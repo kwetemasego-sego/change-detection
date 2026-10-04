@@ -92,6 +92,32 @@
       </details>
     </div>
 
+    <!-- The time series: images between the two dates. "hidden" until it starts loading. -->
+    <div class="step" id="series-section" hidden>
+      <strong>4. Over time</strong>
+      <div id="series-status" class="small"></div>
+      <progress id="series-progress" hidden></progress>
+      <div id="series-chart"></div>
+      <div id="series-player" hidden>
+        <ul class="legend series-legend">
+          <li><span class="line-swatch ndvi"></span>Plant score (NDVI)</li>
+          <li><span class="line-swatch ndbi"></span>Built-up score (NDBI)</li>
+        </ul>
+        <div id="series-readout" class="small"></div>
+        <div class="buttons">
+          <button id="play-button" type="button">Play</button>
+          <label class="small">Speed
+            <select id="speed-select">
+              <option value="1500">Slow</option>
+              <option value="700" selected>Normal</option>
+              <option value="250">Fast</option>
+            </select>
+          </label>
+          <button id="back-button" type="button" hidden>Back to before/after</button>
+        </div>
+      </div>
+    </div>
+
     <div class="step">
       <div class="small"><strong>Pointer:</strong> <span id="pointer-position">-</span></div>
       <div class="buttons">
@@ -102,8 +128,13 @@
     </div>
   </div>
 
-  <!-- Shown when zoomed in closer than the Sentinel-2 photos' 10 m pixels can show -->
-  <div id="zoom-note" hidden>Zoom out for a clearer image</div>
+  <!-- Notes at the top middle of the map -->
+  <div id="map-notes">
+    <!-- The date of the time-series image on the map -->
+    <div id="frame-date" hidden></div>
+    <!-- Shown when zoomed in closer than the Sentinel-2 photos' 10 m pixels can show -->
+    <div id="zoom-note" hidden>Zoom out for a clearer image</div>
+  </div>
 
   <!-- The before/after slider. "hidden" keeps it invisible until there are images to compare. -->
   <div id="swipe-bar" hidden>

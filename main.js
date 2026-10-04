@@ -51,6 +51,14 @@ const DEFAULT_DISPLAY_WHITE = 0.4;
 // pixels. Closer than this the tiles are only enlarged, so we show a note.
 const SENTINEL_SHARPEST_ZOOM = 16;
 
+// --- Time series (section 4e) ---
+const SERIES_STEP_DAYS = 14; // look for one clear image about every 2 weeks
+const SERIES_MAX_IMAGES = 60; // for long date ranges the step grows, so there are at most this many
+const SERIES_MAX_CLOUD = 10; // an image counts as clear if at most 10% of the area is hidden
+const SERIES_TRIES = 3; // images to check in each 2-week period before giving up on it
+const SERIES_SAMPLE_POINTS = 100; // sample the area at up to 100 x 100 points, to keep downloads small
+const SERIES_PARALLEL = 3; // how many periods to check at the same time
+
 // Microsoft Planetary Computer: a free catalogue of Sentinel-2 images, a
 // service that turns any image into map tiles, and the image files themselves.
 // None of these need an API key. Reading the files needs a free "token"
@@ -58,6 +66,8 @@ const SENTINEL_SHARPEST_ZOOM = 16;
 const STAC_SEARCH_URL = "https://planetarycomputer.microsoft.com/api/stac/v1/search";
 const TILE_URL = "https://planetarycomputer.microsoft.com/api/data/v1/item/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png";
 const TOKEN_URL = "https://planetarycomputer.microsoft.com/api/sas/v1/token/sentinel-2-l2a";
+// The same service also cuts out a small piece of an image ("bbox" = the area's edges)
+const CUTOUT_URL = "https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/";
 
 // =====================================================
 // 1. The map, with satellite photos and labels
@@ -71,6 +81,7 @@ const map = L.map("map", { maxZoom: 19 }).setView([START_LAT, START_LNG], START_
 map.createPane("beforePane").style.zIndex = 250;
 map.createPane("afterPane").style.zIndex = 260;
 map.createPane("changesPane").style.zIndex = 300; // the coloured change layer
+map.createPane("seriesPane").style.zIndex = 320; // a time-series image covers everything below it
 map.createPane("labelsPane").style.zIndex = 350;
 map.getPane("labelsPane").style.pointerEvents = "none"; // clicks go through the labels
 
@@ -328,6 +339,11 @@ function choosePair(beforeList, afterList) {
 // What percentage of the area is hidden by cloud, cloud shadow or missing data?
 async function areaCloudPercent(item, grid, token) {
   const scl = await readBandOnGrid(item, "SCL", token, projectGrid(grid, item));
+  return percentHidden(scl);
+}
+
+// The percentage of scene-classification values that are cloud, shadow or missing
+function percentHidden(scl) {
   let skipped = 0;
   for (let i = 0; i < scl.length; i++) {
     if (isNaN(scl[i]) || SKIP_CLASSES.includes(scl[i])) skipped++;
@@ -529,12 +545,19 @@ function storedOffset(item) {
 // Reads the five bands of one photo and works out NDVI, NDBI and which squares to skip
 async function readScores(item, grid, token) {
   const projected = projectGrid(grid, item);
-  const [red, nir, nir20, swir, scl] = await Promise.all(
-    ["B04", "B08", "B8A", "B11", "SCL"].map(function (band) {
+  const bands = await Promise.all(
+    SCORE_BANDS.map(function (band) {
       return readBandOnGrid(item, band, token, projected);
     })
   );
+  return scoresFromBands(item, bands);
+}
 
+// The bands readScores needs, in this order
+const SCORE_BANDS = ["B04", "B08", "B8A", "B11", "SCL"];
+
+// Works out the scores from the five bands' values (one value per grid square each)
+function scoresFromBands(item, [red, nir, nir20, swir, scl]) {
   const offset = storedOffset(item);
   function reflectance(value) {
     return Math.max(0, (value - offset) / 10000);
@@ -544,7 +567,7 @@ async function readScores(item, grid, token) {
     return a + b > 0 ? (a - b) / (a + b) : 0;
   }
 
-  const count = grid.lats.length;
+  const count = red.length;
   const ndvi = new Float32Array(count);
   const ndbi = new Float32Array(count);
   const swirBrightness = new Float32Array(count); // short-wave infrared reflectance, 0 to 1
@@ -754,21 +777,23 @@ findButton.addEventListener("click", async function () {
       statusText.textContent =
         "Drag the slider to compare. Changes are only worked out for areas up to " +
         MAX_CHANGE_AREA_KM + " km × " + MAX_CHANGE_AREA_KM + " km, so draw a smaller area to see them.";
-      return;
+    } else {
+      statusText.textContent = "Reading the image bands and looking for changes…";
+      const grid = makeGrid(chosenArea, CHANGE_PIXEL_METRES);
+      const [beforeScores, afterScores] = await Promise.all([
+        readScores(before.item, grid, token),
+        readScores(after.item, grid, token)
+      ]);
+      const result = compareScores(beforeScores, afterScores, grid);
+
+      changeLayer = drawChanges(grid, result.kinds).addTo(map);
+      changeToggle.textContent = "Hide changes";
+      showSummary(result.counts, result.kinds.length);
+      statusText.textContent = "Done. Drag the slider to compare the photos under the coloured changes.";
     }
 
-    statusText.textContent = "Reading the image bands and looking for changes…";
-    const grid = makeGrid(chosenArea, CHANGE_PIXEL_METRES);
-    const [beforeScores, afterScores] = await Promise.all([
-      readScores(before.item, grid, token),
-      readScores(after.item, grid, token)
-    ]);
-    const result = compareScores(beforeScores, afterScores, grid);
-
-    changeLayer = drawChanges(grid, result.kinds).addTo(map);
-    changeToggle.textContent = "Hide changes";
-    showSummary(result.counts, result.kinds.length);
-    statusText.textContent = "Done. Drag the slider to compare the photos under the coloured changes.";
+    // Finally, the images in between (section 4e). It shows its own progress.
+    await loadTimeSeries(chosenArea, before.item);
   } catch (error) {
     console.warn("Image search or change detection failed:", error);
     statusText.textContent = "Sorry, something went wrong reading the images. Please try again in a moment.";
@@ -883,6 +908,434 @@ function updateZoomNote() {
 }
 map.on("zoomend", updateZoomNote);
 
+// =====================================================
+// 4e. Time series and timelapse
+// =====================================================
+// Between the before and after dates we look for one clear image about every
+// 2 weeks. All of them are taken from the same satellite path and stored in
+// the same 110 km tile as the before image, so they line up with each other
+// (see choosePair). For each one we work out the average plant score (NDVI)
+// and built-up score (NDBI) over the area, and draw them on a small chart.
+// Click a point to see that image on the map, or press Play to see them all
+// in date order.
+// To keep downloads small, we don't read the image files ourselves here: their
+// pixels are stored in blocks about 10 km across, so even a small area costs
+// about 2 MB per image. Instead the Planetary Computer cuts out just our area,
+// at no more than SERIES_SAMPLE_POINTS x SERIES_SAMPLE_POINTS points, with all
+// five bands in one small file (about 120 KB).
+
+const seriesSection = document.getElementById("series-section");
+const seriesStatus = document.getElementById("series-status");
+const seriesProgress = document.getElementById("series-progress");
+const seriesChart = document.getElementById("series-chart");
+const seriesReadout = document.getElementById("series-readout");
+const seriesPlayer = document.getElementById("series-player");
+const playButton = document.getElementById("play-button");
+const speedSelect = document.getElementById("speed-select");
+const backButton = document.getElementById("back-button");
+const frameDate = document.getElementById("frame-date");
+
+let seriesRun = 0; // counts runs; when a new one starts, older ones stop (like lookupNumber)
+let series = []; // the clear images found, in date order: { item, areaCloud, ndvi, ndbi }
+let seriesFrom = null; // the date range the chart shows
+let seriesTo = null;
+
+async function loadTimeSeries(area, beforeItem) {
+  seriesRun = seriesRun + 1;
+  const thisRun = seriesRun;
+  function stillWanted() {
+    return thisRun === seriesRun;
+  }
+
+  seriesSection.hidden = false;
+  seriesPlayer.hidden = true;
+  seriesChart.innerHTML = "";
+  seriesReadout.textContent = "";
+  seriesProgress.hidden = false;
+  seriesProgress.removeAttribute("value"); // a moving bar: we don't know how long yet
+  seriesStatus.textContent = "Searching for images between the two dates…";
+
+  try {
+    seriesFrom = new Date(beforeDateInput.value + "T00:00:00Z");
+    seriesTo = new Date(Math.min(new Date(afterDateInput.value + "T23:59:59Z").getTime(), Date.now()));
+
+    // Every image of the area in the date range, from the same path and tile as the before image
+    const all = await searchAllImages(area, seriesFrom, seriesTo);
+    const sameView = all.filter(function (item) {
+      return item.properties["sat:relative_orbit"] === beforeItem.properties["sat:relative_orbit"] &&
+             item.properties["s2:mgrs_tile"] === beforeItem.properties["s2:mgrs_tile"] &&
+             coversArea(item.geometry, area);
+    });
+    if (!stillWanted()) return;
+
+    // Put them into 2-week periods (longer if the range is very long)
+    const totalDays = (seriesTo - seriesFrom) / ONE_DAY;
+    const stepDays = Math.max(SERIES_STEP_DAYS, totalDays / SERIES_MAX_IMAGES);
+    const periods = [];
+    for (const item of sameView) {
+      const index = Math.floor((new Date(item.properties.datetime) - seriesFrom) / (stepDays * ONE_DAY));
+      if (!periods[index]) periods[index] = [];
+      periods[index].push(item);
+    }
+    const filled = periods.filter(Boolean); // leave out periods with no images at all
+    for (const candidates of filled) {
+      // least cloudy (over the whole 110 km photo) first
+      candidates.sort(function (a, b) {
+        return a.properties["eo:cloud_cover"] - b.properties["eo:cloud_cover"];
+      });
+    }
+
+    // Check the periods a few at a time, updating the progress bar as each finishes
+    const widthMetres = map.distance(area.getSouthWest(), area.getSouthEast());
+    const heightMetres = map.distance(area.getSouthWest(), area.getNorthWest());
+    const grid = makeGrid(area, Math.max(20, Math.max(widthMetres, heightMetres) / SERIES_SAMPLE_POINTS));
+    let checked = 0;
+    seriesProgress.max = filled.length;
+    seriesProgress.value = 0;
+    seriesStatus.textContent = "Checking images: 0 of " + filled.length + " periods…";
+
+    const found = await runFewAtATime(filled, SERIES_PARALLEL, async function (candidates) {
+      const point = await clearestInPeriod(candidates, area, grid, stillWanted);
+      checked = checked + 1;
+      if (stillWanted()) {
+        seriesProgress.value = checked;
+        seriesStatus.textContent = "Checking images: " + checked + " of " + filled.length + " periods…";
+      }
+      return point;
+    });
+    if (!stillWanted()) return;
+
+    series = found.filter(Boolean).sort(function (a, b) {
+      return new Date(a.item.properties.datetime) - new Date(b.item.properties.datetime);
+    });
+    seriesProgress.hidden = true;
+    if (series.length === 0) {
+      seriesStatus.textContent = "No clear images were found between the two dates.";
+      return;
+    }
+    seriesStatus.textContent =
+      series.length + " clear images (at most " + SERIES_MAX_CLOUD + "% cloud over the area). " +
+      "Click a point to see that image.";
+    drawSeriesChart();
+    seriesPlayer.hidden = false;
+  } catch (error) {
+    if (!stillWanted()) return;
+    console.warn("Time series failed:", error);
+    seriesProgress.hidden = true;
+    seriesStatus.textContent = "Sorry, the images between the two dates couldn't be loaded.";
+  }
+}
+
+// Asks the catalogue for every image of the area in a date range. If there are
+// more than fit in one answer, the answer has a "next" link to the rest.
+async function searchAllImages(area, from, to) {
+  let url =
+    STAC_SEARCH_URL +
+    "?collections=sentinel-2-l2a" +
+    "&bbox=" + [area.getWest(), area.getSouth(), area.getEast(), area.getNorth()].join(",") +
+    "&datetime=" + from.toISOString() + "/" + to.toISOString() +
+    "&limit=1000";
+  const items = [];
+  while (url) {
+    const data = await fetchJson(url);
+    items.push(...data.features);
+    const next = (data.links || []).find(function (link) {
+      return link.rel === "next";
+    });
+    url = next ? next.href : null;
+  }
+  return items;
+}
+
+// Tries the least cloudy images of one period until one is clear over the area
+// (the same check as areaCloudPercent, using the scene classification band)
+async function clearestInPeriod(candidates, area, grid, stillWanted) {
+  for (const item of candidates.slice(0, SERIES_TRIES)) {
+    if (!stillWanted()) return null;
+    try {
+      const bands = await readAreaCutout(item, area, grid);
+      const areaCloud = percentHidden(bands[4]); // band 5 is SCL
+      if (areaCloud > SERIES_MAX_CLOUD) continue; // too cloudy: try the next one
+
+      const averages = averageScores(scoresFromBands(item, bands));
+      if (averages) {
+        return { item: item, areaCloud: areaCloud, ndvi: averages.ndvi, ndbi: averages.ndbi };
+      }
+    } catch (error) {
+      console.warn("Could not read " + item.id + ":", error); // try the next one
+    }
+  }
+  return null; // no clear image in this period
+}
+
+// Asks the Planetary Computer for the five SCORE_BANDS over just the area, as a
+// small GeoTIFF with one pixel per grid point. Its rows and columns run along
+// latitude and longitude, from the north-west corner, exactly like makeGrid,
+// so pixel i is grid point i. "nearest" keeps SCL's class numbers exact.
+async function readAreaCutout(item, area, grid) {
+  const url =
+    CUTOUT_URL + [area.getWest(), area.getSouth(), area.getEast(), area.getNorth()].join(",") +
+    "/" + grid.columns + "x" + grid.rows + ".tif" +
+    "?collection=sentinel-2-l2a&item=" + item.id +
+    SCORE_BANDS.map(function (band) { return "&assets=" + band; }).join("") +
+    "&resampling=nearest&reproject=nearest";
+  const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
+  if (!response.ok) throw new Error("The cut-out failed with error " + response.status);
+  const tiff = await GeoTIFF.fromArrayBuffer(await response.arrayBuffer());
+  const image = await tiff.getImage();
+  const bands = await image.readRasters();
+  return bands.slice(0, SCORE_BANDS.length); // (a 6th band says which pixels have data; not needed)
+}
+
+// The average NDVI and NDBI over the clear, dry-land squares
+// (water is left out, as in compareScores). null if almost nothing is clear.
+function averageScores(scores) {
+  let ndviTotal = 0;
+  let ndbiTotal = 0;
+  let count = 0;
+  for (let i = 0; i < scores.ndvi.length; i++) {
+    if (scores.usable[i] && !scores.water[i]) {
+      ndviTotal = ndviTotal + scores.ndvi[i];
+      ndbiTotal = ndbiTotal + scores.ndbi[i];
+      count = count + 1;
+    }
+  }
+  if (count < scores.ndvi.length * 0.1) return null;
+  return { ndvi: ndviTotal / count, ndbi: ndbiTotal / count };
+}
+
+// Runs "work" on every entry of a list, a few at a time (so the image server
+// isn't asked for too much at once), and returns the answers in the same order
+async function runFewAtATime(list, howMany, work) {
+  const answers = new Array(list.length);
+  let next = 0;
+  async function worker() {
+    while (next < list.length) {
+      const i = next;
+      next = next + 1;
+      answers[i] = await work(list[i]);
+    }
+  }
+  const workers = [];
+  for (let w = 0; w < howMany; w++) workers.push(worker());
+  await Promise.all(workers);
+  return answers;
+}
+
+// --- The chart ---
+// Both scores go from -1 to +1, so they share one vertical scale.
+// Points are placed by date, so gaps (cloudy weeks) show as gaps.
+const NDVI_COLOUR = "#2a78d6"; // blue
+const NDBI_COLOUR = "#eb6834"; // orange
+
+function drawSeriesChart() {
+  const width = 276;
+  const height = 150;
+  const left = 32; // room for the numbers on the left
+  const right = 8;
+  const top = 8;
+  const bottom = 20; // room for the dates underneath
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+
+  // The vertical range: just past the lowest and highest values, in steps of 0.1
+  const values = series.flatMap(function (point) { return [point.ndvi, point.ndbi]; });
+  const lowest = Math.floor((Math.min(...values) - 0.02) * 10) / 10;
+  const highest = Math.ceil((Math.max(...values) + 0.02) * 10) / 10;
+  const step = highest - lowest > 0.6 ? 0.2 : 0.1;
+
+  function xFor(point) {
+    const fraction = (new Date(point.item.properties.datetime) - seriesFrom) / (seriesTo - seriesFrom);
+    return left + fraction * plotWidth;
+  }
+  function yFor(value) {
+    return top + ((highest - value) / (highest - lowest)) * plotHeight;
+  }
+
+  let svg = "";
+  // Faint grid lines, with their values on the left
+  for (let value = lowest; value <= highest + 0.001; value += step) {
+    const y = yFor(value).toFixed(1);
+    const isZero = Math.abs(value) < 0.001;
+    svg += '<line x1="' + left + '" x2="' + (width - right) + '" y1="' + y + '" y2="' + y +
+           '" class="' + (isZero ? "grid zero" : "grid") + '"/>';
+    svg += '<text x="' + (left - 4) + '" y="' + y + '" class="axis-label" text-anchor="end" dy="0.32em">' +
+           (isZero ? "0" : value.toFixed(1)) + "</text>";
+  }
+  // The first and last dates underneath
+  svg += '<text x="' + left + '" y="' + (height - 4) + '" class="axis-label">' +
+         niceDate(seriesFrom.toISOString()) + "</text>";
+  svg += '<text x="' + (width - right) + '" y="' + (height - 4) + '" class="axis-label" text-anchor="end">' +
+         niceDate(seriesTo.toISOString()) + "</text>";
+
+  // The line marking the image on the map (moved by markFrame)
+  svg += '<line id="frame-marker" class="frame-marker" y1="' + top + '" y2="' + (top + plotHeight) + '"/>';
+
+  // One line and a dot per image, for each score
+  for (const [key, colour] of [["ndvi", NDVI_COLOUR], ["ndbi", NDBI_COLOUR]]) {
+    const points = series.map(function (point) {
+      return xFor(point).toFixed(1) + "," + yFor(point[key]).toFixed(1);
+    });
+    svg += '<polyline points="' + points.join(" ") + '" fill="none" stroke="' + colour +
+           '" stroke-width="2" stroke-linejoin="round"/>';
+    for (const xy of points) {
+      const [x, y] = xy.split(",");
+      svg += '<circle cx="' + x + '" cy="' + y + '" r="4" fill="' + colour + '" class="dot"/>';
+    }
+  }
+
+  // Invisible strips, one per image, that are easy to hover and click
+  // (much bigger than the dots). Each reaches halfway to its neighbours.
+  for (let i = 0; i < series.length; i++) {
+    const x = xFor(series[i]);
+    const from = i > 0 ? (xFor(series[i - 1]) + x) / 2 : left;
+    const to = i < series.length - 1 ? (x + xFor(series[i + 1])) / 2 : width - right;
+    svg += '<rect x="' + from.toFixed(1) + '" y="' + top + '" width="' + (to - from).toFixed(1) +
+           '" height="' + plotHeight + '" class="hit" data-index="' + i + '" data-x="' + x.toFixed(1) + '"/>';
+  }
+
+  seriesChart.innerHTML =
+    '<svg viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="Average plant score (NDVI) and ' +
+    'built-up score (NDBI) of the area over time">' + svg + "</svg>";
+  markFrame();
+}
+
+// Words for one point, e.g. "12 Mar 2026: plants 0.08, built-up 0.15, 2% cloud"
+function describePoint(point) {
+  return niceDate(point.item.properties.datetime) + ": plants " + point.ndvi.toFixed(2) +
+         ", built-up " + point.ndbi.toFixed(2) + ", " + Math.round(point.areaCloud) + "% cloud";
+}
+
+// Hovering over the chart shows that image's numbers; leaving shows the image on the map again
+seriesChart.addEventListener("mouseover", function (event) {
+  const index = event.target.dataset.index;
+  if (index !== undefined) seriesReadout.textContent = describePoint(series[index]);
+});
+seriesChart.addEventListener("mouseleave", markFrame);
+
+// Clicking shows that image on the map
+seriesChart.addEventListener("click", function (event) {
+  const index = event.target.dataset.index;
+  if (index === undefined) return;
+  pause();
+  showFrame(Number(index));
+});
+
+// Moves the chart's marker line and the date on the map to the image being shown
+function markFrame() {
+  const marker = document.getElementById("frame-marker");
+  const strip = seriesChart.querySelector('[data-index="' + frameIndex + '"]');
+  if (frameIndex < 0 || !strip) {
+    if (marker) marker.style.display = "none";
+    seriesReadout.textContent = series.length ? "Hover over the chart to see the numbers." : "";
+    frameDate.hidden = true;
+    return;
+  }
+  marker.style.display = "";
+  marker.setAttribute("x1", strip.dataset.x);
+  marker.setAttribute("x2", strip.dataset.x);
+  seriesReadout.textContent = describePoint(series[frameIndex]);
+  frameDate.textContent =
+    niceDate(series[frameIndex].item.properties.datetime) + "  ·  " + (frameIndex + 1) + " of " + series.length;
+  frameDate.hidden = false;
+}
+
+// --- Showing one image of the series on the map ---
+// Each image gets its own tile layer. The new one loads on top of the old one,
+// and the old one is only removed once the new one has finished, so the map
+// never flashes empty between frames.
+let frameIndex = -1; // which image of the series is on the map (-1 = none: showing before/after)
+let shownFrameLayer = null; // the image on the map
+let loadingFrameLayer = null; // the next image, while its tiles load
+
+// Returns a promise that finishes when the image has loaded (or after 5 seconds,
+// so one slow tile can't stop the timelapse)
+function showFrame(index) {
+  frameIndex = index;
+  markFrame();
+  backButton.hidden = false;
+  swipeLine.hidden = true; // the before/after cut doesn't apply while a frame is shown
+
+  if (loadingFrameLayer) loadingFrameLayer.remove(); // an older frame that never finished
+  const layer = sentinelLayer(series[index].item, "seriesPane");
+  loadingFrameLayer = layer;
+
+  return new Promise(function (resolve) {
+    function finished() {
+      if (loadingFrameLayer === layer) {
+        if (shownFrameLayer) shownFrameLayer.remove();
+        shownFrameLayer = layer;
+        loadingFrameLayer = null;
+      }
+      resolve();
+    }
+    layer.once("load", finished);
+    setTimeout(finished, 5000);
+    layer.addTo(map);
+  });
+}
+
+// Leaves the timelapse: removes the series image so before/after shows again
+function showBeforeAfter() {
+  pause();
+  if (shownFrameLayer) shownFrameLayer.remove();
+  if (loadingFrameLayer) loadingFrameLayer.remove();
+  shownFrameLayer = null;
+  loadingFrameLayer = null;
+  frameIndex = -1;
+  backButton.hidden = true;
+  if (beforeLayer) swipeLine.hidden = false;
+  markFrame();
+}
+
+backButton.addEventListener("click", showBeforeAfter);
+
+// --- The timelapse player ---
+let playing = false;
+let playNumber = 0; // like seriesRun: pressing Play again stops an older loop
+
+playButton.addEventListener("click", function () {
+  if (playing) {
+    pause();
+  } else {
+    play();
+  }
+});
+
+// Shows the images one after another in date order, starting again at the end
+async function play() {
+  if (series.length === 0) return;
+  playing = true;
+  playNumber = playNumber + 1;
+  const thisPlay = playNumber;
+  playButton.textContent = "Pause";
+
+  let index = frameIndex >= 0 && frameIndex < series.length - 1 ? frameIndex + 1 : 0;
+  while (true) {
+    await showFrame(index); // wait for the image to load...
+    if (!playing || thisPlay !== playNumber) return;
+    await new Promise(function (resolve) {
+      setTimeout(resolve, Number(speedSelect.value)); // ...then let it stay on screen a moment
+    });
+    if (!playing || thisPlay !== playNumber) return;
+    index = (index + 1) % series.length;
+  }
+}
+
+function pause() {
+  playing = false;
+  playButton.textContent = "Play";
+}
+
+// Removes everything the time series added (used when the area or images change)
+function clearTimeSeries() {
+  seriesRun = seriesRun + 1; // stops a run that's still loading
+  showBeforeAfter();
+  series = [];
+  seriesChart.innerHTML = "";
+  seriesSection.hidden = true;
+}
+
 // --- The brightness slider ---
 const brightnessRow = document.getElementById("brightness-row");
 const brightnessSlider = document.getElementById("brightness-slider");
@@ -895,7 +1348,7 @@ brightnessSlider.addEventListener("input", function () {
 
 // When the slider is let go, redraw both photos with the new brightness
 brightnessSlider.addEventListener("change", function () {
-  for (const layer of [beforeLayer, afterLayer]) {
+  for (const layer of [beforeLayer, afterLayer, shownFrameLayer, loadingFrameLayer]) {
     if (layer) layer.setUrl(tileUrlFor(layer.item));
   }
 });
@@ -923,6 +1376,7 @@ function clearComparison() {
   changeSection.hidden = true;
   brightnessRow.hidden = true;
   zoomNote.hidden = true;
+  clearTimeSeries();
   swipeBar.hidden = true;
   swipeLine.hidden = true;
 }
@@ -972,9 +1426,15 @@ function updateSwipe() {
     "rect(" + top + "px, " + Math.min(cut, right) + "px, " + bottom + "px, " + left + "px)";
   map.getPane("afterPane").style.clip =
     "rect(" + top + "px, " + right + "px, " + bottom + "px, " + Math.max(cut, left) + "px)";
+  // A time-series image fills the whole area
+  map.getPane("seriesPane").style.clip =
+    "rect(" + top + "px, " + right + "px, " + bottom + "px, " + left + "px)";
 }
 
-swipeSlider.addEventListener("input", updateSwipe);
+swipeSlider.addEventListener("input", function () {
+  showBeforeAfter(); // moving the slider leaves the timelapse and goes back to before/after
+  updateSwipe();
+});
 map.on("move zoomend resize", updateSwipe); // keep the cut in place when the map moves
 
 // =====================================================
