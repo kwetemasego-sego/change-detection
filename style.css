@@ -67,6 +67,12 @@ body {
   color: #555;
 }
 
+/* The responsible use note under the title */
+.responsible-use {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
 /* Links in the panels (the README and the credits) */
 .hint a,
 .credits a,

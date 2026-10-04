@@ -218,6 +218,13 @@ Sentinel-2 images contain modified Copernicus Sentinel data. Licences and full c
 - **It depends on free public services.** If Planetary Computer, Open-Meteo, SoilGrids, Overpass, GBIF or Nominatim are busy or down, that part shows a message or "Not available" while the rest keeps working. Planetary Computer's tile service is meant for exploring data and limits how many requests it accepts.
 - **It's a quick visual guide, not a survey.** Always check the before and after photos with the slider before drawing conclusions.
 
+## Responsible use
+
+- The tool uses **public satellite data at 10 m resolution**: each square is 10 m across, about the size of a house.
+- At that detail it **can't identify people or vehicles**.
+- **Don't use it to watch individuals or private property.** It's for seeing how land changes: building sites, farms, parks, fires.
+- **A person should check the results before anyone acts on them.** The tool makes mistakes (see [VALIDATION.md](VALIDATION.md)), so look at the before and after photos first.
+
 ---
 
 ## Running it on your own computer
