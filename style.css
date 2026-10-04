@@ -138,6 +138,52 @@ body {
   color: #666;
 }
 
+/* --- The change detection results --- */
+.legend {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+}
+
+.legend b {
+  margin-left: auto; /* pushes the percentage to the right-hand side */
+  padding-left: 8px;
+}
+
+/* The little coloured squares, matching the colours in main.js (CHANGE_COLOURS) */
+.swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+.swatch.gained { background: rgb(46, 204, 64); }
+.swatch.lost { background: rgb(255, 65, 54); }
+.swatch.built { background: rgb(0, 116, 217); }
+.swatch.skipped { background: rgba(150, 150, 150, 0.6); }
+
+details summary {
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+details p {
+  margin: 6px 0 0;
+}
+
+/* Keep each 10 m square sharp when zoomed in, instead of blurring them together */
+.change-layer {
+  image-rendering: pixelated;
+}
+
 /* --- The before/after swipe slider, at the bottom middle of the screen --- */
 #swipe-bar {
   position: absolute;

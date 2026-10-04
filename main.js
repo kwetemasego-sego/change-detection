@@ -17,10 +17,35 @@ const SEARCH_WINDOW_DAYS = 20;
 // compared with 1% more cloud. 0.5 means "1 day further away = 0.5% cloudier".
 const DAY_PENALTY = 0.5;
 
-// Microsoft Planetary Computer: a free catalogue of Sentinel-2 images, plus a
-// service that turns any image into map tiles. Neither needs an API key.
+// How many of the least cloudy images near each date to check closely, by
+// looking at the cloud over the chosen area itself (more = slower but better)
+const IMAGES_TO_CHECK = 6;
+
+// How much it counts against a before/after pair if the two photos were taken
+// from different satellite paths (see choosePair). 20 = "as bad as 20% more cloud".
+const DIFFERENT_VIEW_PENALTY = 20;
+
+// --- Change detection ---
+// A pixel only counts as changed if the difference is at least this big.
+// NDVI and NDBI are scores from -1 to +1 (see section 4b for what they mean).
+// Smaller differences usually come from haze, the sun's angle or the season,
+// not from real changes on the ground.
+const NDVI_THRESHOLD = 0.15; // plant greenness must rise or fall by at least 0.15
+const PLANTS_NDVI = 0.3; // ...and the square must look like plants (NDVI 0.3+) on the greener date
+const NDBI_THRESHOLD = 0.1; // built-up score must rise by at least 0.10
+// Two things can raise the built-up score without anything being built:
+const WET_SWIR = 0.15; // ground this dark in short-wave infrared before was wet (tidal mud), so drying isn't counted
+const SHADOW_DARKENING = 0.6; // ground that became this much darker (less than 60%) is usually in a new, longer shadow
+const CHANGE_PIXEL_METRES = 10; // size of each compared square (Sentinel-2's sharpest bands are 10 m)
+const MAX_CHANGE_AREA_KM = 10; // larger areas would download too much, so changes aren't calculated
+
+// Microsoft Planetary Computer: a free catalogue of Sentinel-2 images, a
+// service that turns any image into map tiles, and the image files themselves.
+// None of these need an API key. Reading the files needs a free "token"
+// (a temporary pass) that anyone can get from TOKEN_URL.
 const STAC_SEARCH_URL = "https://planetarycomputer.microsoft.com/api/stac/v1/search";
 const TILE_URL = "https://planetarycomputer.microsoft.com/api/data/v1/item/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png";
+const TOKEN_URL = "https://planetarycomputer.microsoft.com/api/sas/v1/token/sentinel-2-l2a";
 
 // =====================================================
 // 1. The map, with satellite photos and labels
@@ -33,6 +58,7 @@ const map = L.map("map", { maxZoom: 19 }).setView([START_LAT, START_LNG], START_
 // but below the street and place names. Higher zIndex = closer to the top.
 map.createPane("beforePane").style.zIndex = 250;
 map.createPane("afterPane").style.zIndex = 260;
+map.createPane("changesPane").style.zIndex = 300; // the coloured change layer
 map.createPane("labelsPane").style.zIndex = 350;
 map.getPane("labelsPane").style.pointerEvents = "none"; // clicks go through the labels
 
@@ -186,14 +212,31 @@ beforeDateInput.max = toDateText(today);
 // =====================================================
 // 4. Finding the clearest Sentinel-2 image near a date
 // =====================================================
-// Sentinel-2 is a pair of European satellites (now three) that photograph
-// the whole Earth every few days. Each photo ("item") covers a square about
-// 110 km across. We ask the Planetary Computer catalogue for every photo of
-// our area taken within SEARCH_WINDOW_DAYS of the date, then choose one.
+// Sentinel-2 is a group of European satellites that photograph the whole
+// Earth every few days. Each photo ("item") covers a square about 110 km
+// across. We ask the Planetary Computer catalogue for every photo of our area
+// taken within SEARCH_WINDOW_DAYS of the date, then choose the clearest one
+// by looking at the clouds over our area only (not the whole 110 km photo).
 
 const ONE_DAY = 24 * 60 * 60 * 1000; // in milliseconds
 
-async function findClearestImage(area, dateText) {
+// Sentinel-2's "scene classification" band (SCL) labels every 20 m pixel with
+// what the satellite thinks is there. We skip pixels with these labels,
+// because they don't show the ground clearly:
+//   0 = no data, 1 = faulty pixel, 3 = cloud shadow,
+//   8 = cloud (medium), 9 = cloud (high), 10 = thin cirrus cloud
+const SKIP_CLASSES = [0, 1, 3, 8, 9, 10];
+const WATER_CLASS = 6; // SCL also marks water
+
+// Gets the free token (temporary pass) needed to read Planetary Computer's image files
+async function getToken() {
+  const data = await fetchJson(TOKEN_URL);
+  return data.token;
+}
+
+// Finds the photos near a date that cover the whole area, and checks the
+// clouds over the area for the most promising few
+async function findClearImages(area, dateText, token) {
   const date = new Date(dateText + "T12:00:00Z");
   const from = new Date(date.getTime() - SEARCH_WINDOW_DAYS * ONE_DAY);
   const to = new Date(Math.min(date.getTime() + SEARCH_WINDOW_DAYS * ONE_DAY, Date.now()));
@@ -211,18 +254,73 @@ async function findClearestImage(area, dateText) {
   const covering = data.features.filter(function (item) {
     return coversArea(item.geometry, area);
   });
-  if (covering.length === 0) return null;
+  if (covering.length === 0) return [];
 
-  // Give each photo a score: its cloud cover (%), plus a little for each day
-  // away from the chosen date. The lowest score is the clearest nearby photo.
-  function score(item) {
-    const daysAway = Math.abs(new Date(item.properties.datetime) - date) / ONE_DAY;
-    return item.properties["eo:cloud_cover"] + daysAway * DAY_PENALTY;
+  // First, a quick sort using the cloud cover of the whole photo,
+  // plus a little for each day away from the chosen date
+  function daysAway(item) {
+    return Math.abs(new Date(item.properties.datetime) - date) / ONE_DAY;
   }
   covering.sort(function (a, b) {
-    return score(a) - score(b);
+    return (a.properties["eo:cloud_cover"] + daysAway(a) * DAY_PENALTY) -
+           (b.properties["eo:cloud_cover"] + daysAway(b) * DAY_PENALTY);
   });
-  return covering[0];
+
+  // Then look closely at the best few: how cloudy is it over OUR area?
+  // (We check them all at the same time.)
+  const grid = makeGrid(area, 20); // 20 m squares, the size of SCL's pixels
+  const candidates = covering.slice(0, IMAGES_TO_CHECK);
+  const cloudPercents = await Promise.all(
+    candidates.map(function (item) {
+      return areaCloudPercent(item, grid, token).catch(function () {
+        return null; // couldn't read this one: leave it out
+      });
+    })
+  );
+
+  // The score: cloud over the area (%), plus a little for each day away
+  const checked = [];
+  for (let i = 0; i < candidates.length; i++) {
+    if (cloudPercents[i] === null) continue;
+    checked.push({
+      item: candidates[i],
+      areaCloud: cloudPercents[i],
+      score: cloudPercents[i] + daysAway(candidates[i]) * DAY_PENALTY
+    });
+  }
+  return checked; // a list of { item, areaCloud, score } (empty if none could be checked)
+}
+
+// Picks the best before photo and after photo TOGETHER.
+// Photos taken from the same satellite path ("relative orbit") and stored in the
+// same 110 km tile see the ground from the same angle, so buildings lean the same
+// way and their pixels line up. Photos from different paths can make a city look
+// changed when it isn't, so a mismatched pair gets a big penalty.
+function choosePair(beforeList, afterList) {
+  function sameView(a, b) {
+    return a.item.properties["sat:relative_orbit"] === b.item.properties["sat:relative_orbit"] &&
+           a.item.properties["s2:mgrs_tile"] === b.item.properties["s2:mgrs_tile"];
+  }
+  let best = null;
+  for (const before of beforeList) {
+    for (const after of afterList) {
+      const score = before.score + after.score + (sameView(before, after) ? 0 : DIFFERENT_VIEW_PENALTY);
+      if (!best || score < best.score) {
+        best = { before: before, after: after, sameView: sameView(before, after), score: score };
+      }
+    }
+  }
+  return best; // null if either list is empty
+}
+
+// What percentage of the area is hidden by cloud, cloud shadow or missing data?
+async function areaCloudPercent(item, grid, token) {
+  const scl = await readBandOnGrid(item, "SCL", token, projectGrid(grid, item));
+  let skipped = 0;
+  for (let i = 0; i < scl.length; i++) {
+    if (isNaN(scl[i]) || SKIP_CLASSES.includes(scl[i])) skipped++;
+  }
+  return (100 * skipped) / scl.length;
 }
 
 // Does a photo's outline contain all four corners of our area?
@@ -257,6 +355,395 @@ function insideOutline(point, outline) {
   return inside;
 }
 
+// =====================================================
+// 4a. Reading image bands with geotiff.js
+// =====================================================
+// A Sentinel-2 photo is stored as several files, one per "band" (colour of
+// light). We use five of them:
+//   B04 = red light (10 m pixels)
+//   B08 = near-infrared, invisible light that plants reflect strongly (10 m pixels)
+//   B8A = near-infrared again, in a narrower range and with 20 m pixels
+//   B11 = short-wave infrared, reflected strongly by bare ground and buildings (20 m pixels)
+//   SCL = the scene classification described above (20 m pixels)
+// The files are "Cloud-Optimized GeoTIFFs": geotiff.js can download just the
+// small block of pixels we need, instead of the whole 200 MB file.
+
+// The grid: points spread evenly over the area, one per square of "metres" size.
+// Points go row by row, from the top-left (north-west) corner.
+function makeGrid(area, metres) {
+  const widthMetres = map.distance(area.getSouthWest(), area.getSouthEast());
+  const heightMetres = map.distance(area.getSouthWest(), area.getNorthWest());
+  const columns = Math.max(1, Math.round(widthMetres / metres));
+  const rows = Math.max(1, Math.round(heightMetres / metres));
+  const lats = new Float64Array(columns * rows);
+  const lngs = new Float64Array(columns * rows);
+
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      const i = row * columns + column;
+      // the centre of each square
+      lats[i] = area.getNorth() - ((row + 0.5) * (area.getNorth() - area.getSouth())) / rows;
+      lngs[i] = area.getWest() + ((column + 0.5) * (area.getEast() - area.getWest())) / columns;
+    }
+  }
+  return { columns: columns, rows: rows, lats: lats, lngs: lngs };
+}
+
+// Sentinel-2 files don't use latitude and longitude. They use a flat map grid
+// called UTM, measured in metres, which is different in each 6° wide "zone"
+// of the Earth. Abu Dhabi sits right on the edge between zones 39 and 40, so
+// the before and after photos may even use different zones!
+// proj4 converts every grid point into the photo's own UTM coordinates.
+function projectGrid(grid, item) {
+  const epsg = item.properties["proj:epsg"]; // e.g. 32640 = UTM zone 40, northern half of the Earth
+  const zone = epsg % 100;
+  const south = epsg >= 32700 ? " +south" : "";
+  const toUtm = proj4("WGS84", "+proj=utm +zone=" + zone + south + " +datum=WGS84 +units=m +no_defs");
+
+  const xs = new Float64Array(grid.lats.length);
+  const ys = new Float64Array(grid.lats.length);
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < grid.lats.length; i++) {
+    const [x, y] = toUtm.forward([grid.lngs[i], grid.lats[i]]);
+    xs[i] = x;
+    ys[i] = y;
+    // keep track of the smallest and largest, to know which block of pixels to download
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  }
+  return { xs: xs, ys: ys, minX: minX, maxX: maxX, minY: minY, maxY: maxY };
+}
+
+// Reads one band of a photo, and returns its value at every grid point
+// (in the same order as the grid). NaN = no value there.
+// The image server sometimes drops a connection when many files are read at
+// once, so if a read fails we wait a moment and try again (up to 3 times).
+async function readBandOnGrid(item, bandName, token, projected) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await readBandOnGridOnce(item, bandName, token, projected);
+    } catch (error) {
+      if (attempt >= 3) throw error; // give up after the third try
+      await new Promise(function (resolve) {
+        setTimeout(resolve, 1000 * attempt); // wait 1 second, then 2 seconds
+      });
+    }
+  }
+}
+
+async function readBandOnGridOnce(item, bandName, token, projected) {
+  const tiff = await GeoTIFF.fromUrl(item.assets[bandName].href + "?" + token);
+  const image = await tiff.getImage();
+  const [originX, originY] = image.getOrigin(); // UTM position of the file's top-left corner
+  const [pixelWidth, pixelHeight] = image.getResolution(); // e.g. 10 and -10 (rows go south)
+
+  // Which block of pixels covers all our grid points? (plus 1 pixel spare on each side)
+  const left = Math.max(0, Math.floor((projected.minX - originX) / pixelWidth) - 1);
+  const right = Math.min(image.getWidth(), Math.ceil((projected.maxX - originX) / pixelWidth) + 1);
+  const top = Math.max(0, Math.floor((projected.maxY - originY) / pixelHeight) - 1);
+  const bottom = Math.min(image.getHeight(), Math.ceil((projected.minY - originY) / pixelHeight) + 1);
+
+  // Download just that block
+  const [pixels] = await image.readRasters({ window: [left, top, right, bottom] });
+  const blockWidth = right - left;
+  const blockHeight = bottom - top;
+
+  // Look up the pixel under each grid point
+  const values = new Float32Array(projected.xs.length);
+  for (let i = 0; i < values.length; i++) {
+    const column = Math.floor((projected.xs[i] - originX) / pixelWidth) - left;
+    const row = Math.floor((projected.ys[i] - originY) / pixelHeight) - top;
+    const inside = column >= 0 && column < blockWidth && row >= 0 && row < blockHeight;
+    values[i] = inside ? pixels[row * blockWidth + column] : NaN;
+  }
+  return values;
+}
+
+// =====================================================
+// 4b. Change detection
+// =====================================================
+// For every 10 m square we work out two scores, for each date:
+//   NDVI ("plant greenness") = (near-infrared - red) / (near-infrared + red)
+//     Plants reflect lots of near-infrared, so: about 0.5 or more = lush plants,
+//     about 0.2 = sparse plants, near 0 or below = sand, concrete or water.
+//   NDBI ("built-up score") = (short-wave infrared - near-infrared) / (short-wave infrared + near-infrared)
+//     Bare ground, concrete and roofs reflect lots of short-wave infrared,
+//     so this score goes up when land is cleared, dug up or built on.
+//     It uses B8A and B11, which both have 20 m pixels. Mixing a sharp 10 m band
+//     with a blurrier 20 m band would make false changes along every shadow edge.
+// Then we compare the scores between the two dates.
+
+// The kinds of change, and the colour each is drawn in (red, green, blue, opacity 0-255)
+const NO_CHANGE = 0;
+const PLANTS_GAINED = 1;
+const PLANTS_LOST = 2;
+const NEW_BUILT_OR_BARE = 3;
+const SKIPPED = 4;
+const CHANGE_COLOURS = {
+  [PLANTS_GAINED]: [46, 204, 64, 220], // green
+  [PLANTS_LOST]: [255, 65, 54, 220], // red
+  [NEW_BUILT_OR_BARE]: [0, 116, 217, 220], // blue
+  [SKIPPED]: [150, 150, 150, 110] // see-through grey
+};
+
+// Reads the five bands of one photo and works out NDVI, NDBI and which squares to skip
+async function readScores(item, grid, token) {
+  const projected = projectGrid(grid, item);
+  const [red, nir, nir20, swir, scl] = await Promise.all(
+    ["B04", "B08", "B8A", "B11", "SCL"].map(function (band) {
+      return readBandOnGrid(item, band, token, projected);
+    })
+  );
+
+  // The files store light as whole numbers. Since 2022 (processing version
+  // 04.00 and later) a 1000 has been added to every value, so we take it off
+  // again, then divide by 10000 to get the fraction of light reflected (0 to 1).
+  const offset = Number(item.properties["s2:processing_baseline"]) >= 4 ? 1000 : 0;
+  function reflectance(value) {
+    return Math.max(0, (value - offset) / 10000);
+  }
+  // A score like NDVI, safe from dividing by zero
+  function normalisedDifference(a, b) {
+    return a + b > 0 ? (a - b) / (a + b) : 0;
+  }
+
+  const count = grid.lats.length;
+  const ndvi = new Float32Array(count);
+  const ndbi = new Float32Array(count);
+  const swirBrightness = new Float32Array(count); // short-wave infrared reflectance, 0 to 1
+  const usable = new Uint8Array(count); // 1 = clear view of the ground, 0 = skip
+  const water = new Uint8Array(count); // 1 = SCL says water
+
+  for (let i = 0; i < count; i++) {
+    const clear = !isNaN(scl[i]) && !SKIP_CLASSES.includes(scl[i]) && red[i] > 0 && nir[i] > 0;
+    usable[i] = clear ? 1 : 0;
+    water[i] = scl[i] === WATER_CLASS ? 1 : 0;
+    const r = reflectance(red[i]);
+    const n = reflectance(nir[i]);
+    const n20 = reflectance(nir20[i]);
+    const s = reflectance(swir[i]);
+    ndvi[i] = normalisedDifference(n, r);
+    ndbi[i] = normalisedDifference(s, n20);
+    swirBrightness[i] = s;
+  }
+  return { ndvi: ndvi, ndbi: ndbi, swir: swirBrightness, usable: usable, water: water };
+}
+
+// Compares before and after, square by square. Returns the kind of change for
+// each square, plus how many squares there are of each kind.
+function compareScores(before, after, grid) {
+  let kinds = new Uint8Array(before.ndvi.length);
+
+  for (let i = 0; i < kinds.length; i++) {
+    let kind = NO_CHANGE;
+    if (!before.usable[i] || !after.usable[i]) {
+      kind = SKIPPED; // cloud, shadow or missing data in either photo
+    } else if (before.water[i] || after.water[i]) {
+      // Water or shoreline on either date: tides, waves and wet mud make these
+      // look different from day to day even when nothing was built, so we leave them out.
+      kind = NO_CHANGE;
+    } else {
+      const ndviChange = after.ndvi[i] - before.ndvi[i];
+      const ndbiChange = after.ndbi[i] - before.ndbi[i];
+      if (ndviChange >= NDVI_THRESHOLD && after.ndvi[i] >= PLANTS_NDVI) {
+        kind = PLANTS_GAINED; // greener, and now really looks like plants
+      } else if (ndviChange <= -NDVI_THRESHOLD && before.ndvi[i] >= PLANTS_NDVI) {
+        kind = PLANTS_LOST; // less green, and it really was plants before
+      } else if (ndbiChange >= NDBI_THRESHOLD) {
+        const wasWet = before.swir[i] < WET_SWIR; // wet ground absorbs short-wave infrared
+        const newShadow = after.swir[i] < SHADOW_DARKENING * before.swir[i];
+        if (!wasWet && !newShadow) {
+          kind = NEW_BUILT_OR_BARE;
+        }
+      }
+    }
+    kinds[i] = kind;
+  }
+
+  kinds = removeLoneSquares(kinds, grid.columns, grid.rows);
+
+  // Count how many squares there are of each kind
+  const counts = { [NO_CHANGE]: 0, [PLANTS_GAINED]: 0, [PLANTS_LOST]: 0, [NEW_BUILT_OR_BARE]: 0, [SKIPPED]: 0 };
+  for (let i = 0; i < kinds.length; i++) {
+    counts[kinds[i]]++;
+  }
+  return { kinds: kinds, counts: counts };
+}
+
+// Real changes (a building site, a cleared field) cover a patch of ground.
+// A single changed square with no matching neighbours is usually just noise,
+// so a changed square only stays if at least 2 of its 8 neighbours changed the same way.
+function removeLoneSquares(kinds, columns, rows) {
+  const kept = new Uint8Array(kinds); // a copy, so our checks always look at the original
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      const kind = kinds[row * columns + column];
+      if (kind === NO_CHANGE || kind === SKIPPED) continue;
+
+      let sameNeighbours = 0;
+      for (let dRow = -1; dRow <= 1; dRow++) {
+        for (let dColumn = -1; dColumn <= 1; dColumn++) {
+          const r = row + dRow;
+          const c = column + dColumn;
+          if ((dRow !== 0 || dColumn !== 0) && r >= 0 && r < rows && c >= 0 && c < columns &&
+              kinds[r * columns + c] === kind) {
+            sameNeighbours++;
+          }
+        }
+      }
+      if (sameNeighbours < 2) {
+        kept[row * columns + column] = NO_CHANGE;
+      }
+    }
+  }
+  return kept;
+}
+
+// Paints the changes onto a picture, one picture-pixel per grid square,
+// and puts it on the map over the chosen area
+function drawChanges(grid, kinds) {
+  const canvas = document.createElement("canvas");
+  canvas.width = grid.columns;
+  canvas.height = grid.rows;
+  const context = canvas.getContext("2d");
+  const picture = context.createImageData(grid.columns, grid.rows);
+
+  for (let i = 0; i < kinds.length; i++) {
+    const colour = CHANGE_COLOURS[kinds[i]]; // undefined for "no change": left see-through
+    if (colour) {
+      picture.data.set(colour, i * 4); // 4 numbers per pixel: red, green, blue, opacity
+    }
+  }
+  context.putImageData(picture, 0, 0);
+
+  return L.imageOverlay(canvas.toDataURL(), chosenArea, {
+    pane: "changesPane",
+    className: "change-layer", // style.css keeps the squares sharp instead of blurry
+    interactive: false
+  });
+}
+
+// Writes the percentages into the panel
+function showSummary(counts, totalSquares) {
+  const compared = totalSquares - counts[SKIPPED];
+  function percentOfCompared(count) {
+    return compared > 0 ? ((100 * count) / compared).toFixed(1) + "%" : "-";
+  }
+  const changed = counts[PLANTS_GAINED] + counts[PLANTS_LOST] + counts[NEW_BUILT_OR_BARE];
+
+  document.getElementById("pct-gained").textContent = percentOfCompared(counts[PLANTS_GAINED]);
+  document.getElementById("pct-lost").textContent = percentOfCompared(counts[PLANTS_LOST]);
+  document.getElementById("pct-built").textContent = percentOfCompared(counts[NEW_BUILT_OR_BARE]);
+  document.getElementById("change-total").textContent =
+    "Changed: " + percentOfCompared(changed) + " of the " + compared.toLocaleString() +
+    " squares that could be compared.";
+  document.getElementById("pct-skipped").textContent =
+    counts[SKIPPED].toLocaleString() + " squares (" +
+    ((100 * counts[SKIPPED]) / totalSquares).toFixed(1) + "% of the area)";
+  changeSection.hidden = false;
+}
+
+// =====================================================
+// 4c. The "Find images" button: puts it all together
+// =====================================================
+
+const findButton = document.getElementById("find-button");
+const beforeInfo = document.getElementById("before-info");
+const afterInfo = document.getElementById("after-info");
+const changeSection = document.getElementById("change-section");
+const changeToggle = document.getElementById("change-toggle");
+
+let beforeLayer = null; // the Sentinel-2 layers being shown (null = none)
+let afterLayer = null;
+let changeLayer = null; // the coloured change layer (null = none)
+
+findButton.addEventListener("click", async function () {
+  if (!chosenArea) {
+    statusText.textContent = "First choose an area: press Draw area or Use visible area.";
+    return;
+  }
+  if (beforeDateInput.value >= afterDateInput.value) {
+    statusText.textContent = "The before date must be earlier than the after date.";
+    return;
+  }
+
+  clearComparison();
+  findButton.disabled = true;
+  statusText.textContent = "Searching for Sentinel-2 images and checking clouds over your area…";
+
+  try {
+    const token = await getToken();
+
+    // Search for both dates at the same time, then pick the best matching pair
+    const [beforeList, afterList] = await Promise.all([
+      findClearImages(chosenArea, beforeDateInput.value, token),
+      findClearImages(chosenArea, afterDateInput.value, token)
+    ]);
+    const pair = choosePair(beforeList, afterList);
+
+    if (!pair) {
+      beforeInfo.textContent = beforeList.length ? "Found" : "No clear image found";
+      afterInfo.textContent = afterList.length ? "Found" : "No clear image found";
+      statusText.textContent =
+        "No image covering the whole area was found within " + SEARCH_WINDOW_DAYS +
+        " days of one of the dates. Try other dates or a smaller area.";
+      return;
+    }
+    const before = pair.before;
+    const after = pair.after;
+    beforeInfo.textContent = describeImage(before);
+    afterInfo.textContent = describeImage(after);
+
+    // Show the two photos with the swipe slider
+    beforeLayer = sentinelLayer(before.item, "beforePane").addTo(map);
+    afterLayer = sentinelLayer(after.item, "afterPane").addTo(map);
+    showSwipe(niceDate(before.item.properties.datetime), niceDate(after.item.properties.datetime));
+    map.fitBounds(chosenArea);
+
+    // Work out what changed (only for areas that aren't too big)
+    const widthKm = map.distance(chosenArea.getSouthWest(), chosenArea.getSouthEast()) / 1000;
+    const heightKm = map.distance(chosenArea.getSouthWest(), chosenArea.getNorthWest()) / 1000;
+    if (widthKm > MAX_CHANGE_AREA_KM || heightKm > MAX_CHANGE_AREA_KM) {
+      statusText.textContent =
+        "Drag the slider to compare. Changes are only worked out for areas up to " +
+        MAX_CHANGE_AREA_KM + " km × " + MAX_CHANGE_AREA_KM + " km, so draw a smaller area to see them.";
+      return;
+    }
+
+    statusText.textContent = "Reading the image bands and looking for changes…";
+    const grid = makeGrid(chosenArea, CHANGE_PIXEL_METRES);
+    const [beforeScores, afterScores] = await Promise.all([
+      readScores(before.item, grid, token),
+      readScores(after.item, grid, token)
+    ]);
+    const result = compareScores(beforeScores, afterScores, grid);
+
+    changeLayer = drawChanges(grid, result.kinds).addTo(map);
+    changeToggle.textContent = "Hide changes";
+    showSummary(result.counts, result.kinds.length);
+    statusText.textContent = "Done. Drag the slider to compare the photos under the coloured changes.";
+  } catch (error) {
+    console.warn("Image search or change detection failed:", error);
+    statusText.textContent = "Sorry, something went wrong reading the images. Please try again in a moment.";
+  } finally {
+    findButton.disabled = false;
+  }
+});
+
+// The "Hide changes / Show changes" button
+changeToggle.addEventListener("click", function () {
+  if (!changeLayer) return;
+  if (map.hasLayer(changeLayer)) {
+    changeLayer.remove();
+    changeToggle.textContent = "Show changes";
+  } else {
+    changeLayer.addTo(map);
+    changeToggle.textContent = "Hide changes";
+  }
+});
+
 // Makes a map layer that shows one Sentinel-2 photo, using the Planetary
 // Computer's tile service. "visual" is the ready-made true-colour picture.
 // bounds: only load the part inside our area, so the rest of the map stays normal.
@@ -280,71 +767,22 @@ function niceDate(isoText) {
   return new Date(isoText).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-// --- The "Find images" button ---
-const findButton = document.getElementById("find-button");
-const beforeInfo = document.getElementById("before-info");
-const afterInfo = document.getElementById("after-info");
-
-let beforeLayer = null; // the Sentinel-2 layers being shown (null = none)
-let afterLayer = null;
-
-findButton.addEventListener("click", async function () {
-  if (!chosenArea) {
-    statusText.textContent = "First choose an area: press Draw area or Use visible area.";
-    return;
-  }
-  if (beforeDateInput.value >= afterDateInput.value) {
-    statusText.textContent = "The before date must be earlier than the after date.";
-    return;
-  }
-
-  clearComparison();
-  findButton.disabled = true;
-  statusText.textContent = "Searching for Sentinel-2 images…";
-
-  try {
-    // Search for both dates at the same time
-    const [beforeItem, afterItem] = await Promise.all([
-      findClearestImage(chosenArea, beforeDateInput.value),
-      findClearestImage(chosenArea, afterDateInput.value)
-    ]);
-
-    beforeInfo.textContent = describeImage(beforeItem);
-    afterInfo.textContent = describeImage(afterItem);
-
-    if (!beforeItem || !afterItem) {
-      statusText.textContent =
-        "No image covering the whole area was found within " + SEARCH_WINDOW_DAYS +
-        " days of one of the dates. Try other dates or a smaller area.";
-      return;
-    }
-
-    beforeLayer = sentinelLayer(beforeItem, "beforePane").addTo(map);
-    afterLayer = sentinelLayer(afterItem, "afterPane").addTo(map);
-    showSwipe(niceDate(beforeItem.properties.datetime), niceDate(afterItem.properties.datetime));
-    map.fitBounds(chosenArea);
-    statusText.textContent = "Drag the slider to swipe between before and after.";
-  } catch (error) {
-    console.warn("Image search failed:", error);
-    statusText.textContent = "Sorry, the image search didn't work. Please try again in a moment.";
-  } finally {
-    findButton.disabled = false;
-  }
-});
-
-function describeImage(item) {
-  if (!item) return "No clear image found";
-  return niceDate(item.properties.datetime) + ", " + Math.round(item.properties["eo:cloud_cover"]) + "% cloud";
+function describeImage(found) {
+  if (!found) return "No clear image found";
+  return niceDate(found.item.properties.datetime) + ", " + Math.round(found.areaCloud) + "% cloud over the area";
 }
 
-// Removes the Sentinel-2 images and the slider
+// Removes the Sentinel-2 images, the change layer and the slider
 function clearComparison() {
   if (beforeLayer) beforeLayer.remove();
   if (afterLayer) afterLayer.remove();
+  if (changeLayer) changeLayer.remove();
   beforeLayer = null;
   afterLayer = null;
+  changeLayer = null;
   beforeInfo.textContent = "-";
   afterInfo.textContent = "-";
+  changeSection.hidden = true;
   swipeBar.hidden = true;
   swipeLine.hidden = true;
 }

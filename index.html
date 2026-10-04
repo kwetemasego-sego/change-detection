@@ -52,6 +52,40 @@
       <div id="status-text" class="status">Start by choosing an area.</div>
     </div>
 
+    <!-- Results of the change detection. "hidden" until there are results. -->
+    <div class="step" id="change-section" hidden>
+      <strong>3. Changes found</strong>
+      <ul class="legend">
+        <li><span class="swatch gained"></span>Plants gained <b id="pct-gained"></b></li>
+        <li><span class="swatch lost"></span>Plants lost <b id="pct-lost"></b></li>
+        <li><span class="swatch built"></span>New buildings or bare ground <b id="pct-built"></b></li>
+      </ul>
+      <div id="change-total"></div>
+      <div class="small">
+        <span class="swatch skipped"></span>Skipped because of cloud, shadow or missing data:
+        <span id="pct-skipped"></span>
+      </div>
+      <div class="buttons">
+        <button id="change-toggle" type="button">Hide changes</button>
+      </div>
+      <details class="small">
+        <summary>How are small changes ignored?</summary>
+        <p>
+          Each 10 m square gets a plant greenness score (NDVI) and a built-up score
+          (NDBI), both from −1 to +1. A square only counts as changed if its plant
+          score moved by <b>0.15</b> or more, or its built-up score rose by <b>0.10</b>
+          or more. Smaller shifts usually come from haze, the sun's angle or the
+          season, not from real changes on the ground.
+        </p>
+        <p>
+          A changed square also needs at least 2 neighbours that changed the same way,
+          because real changes cover a patch of ground. Water and shorelines, ground
+          that was wet before, and ground that fell into a new shadow are left out,
+          because tides and the sun make them look different without anything changing.
+        </p>
+      </details>
+    </div>
+
     <div class="step">
       <div class="small"><strong>Pointer:</strong> <span id="pointer-position">-</span></div>
       <div class="buttons">
@@ -92,7 +126,13 @@
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
           crossorigin=""></script>
 
-  <!-- Our own code. It must come AFTER Leaflet, because it uses Leaflet. -->
+  <!-- geotiff.js reads the satellite image files (GeoTIFFs) in the browser -->
+  <script src="https://cdn.jsdelivr.net/npm/geotiff@3.0.5/dist-browser/geotiff.js"></script>
+
+  <!-- proj4 converts latitude/longitude into the satellite images' own map grid (UTM) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.15.0/proj4.js"></script>
+
+  <!-- Our own code. It must come AFTER the libraries above, because it uses them. -->
   <script src="main.js"></script>
 </body>
 </html>
