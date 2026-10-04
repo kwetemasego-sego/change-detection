@@ -47,9 +47,62 @@ body {
   color: #555;
 }
 
+/* The place details panel in the bottom-left corner */
+#place-panel {
+  position: absolute;
+  bottom: 24px;
+  left: 10px;
+  z-index: 1000;
+  width: 320px;
+  max-width: calc(100% - 20px);
+  max-height: 55vh; /* never more than about half the screen height */
+  overflow-y: auto; /* scroll inside the panel if the text is too long */
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  font-size: 13px;
+  line-height: 1.45;
+  box-sizing: border-box;
+}
+
+.panel-title {
+  font-weight: bold;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+#place-coords {
+  font-weight: normal;
+  font-size: 12px;
+  color: #555;
+  font-variant-numeric: tabular-nums;
+}
+
+/* <dl> is a "description list": a label (dt) followed by its value (dd) */
+#place-panel dl {
+  margin: 0;
+}
+
+#place-panel dt {
+  font-weight: bold;
+  margin-top: 4px;
+}
+
+#place-panel dd {
+  margin: 0 0 0 10px;
+}
+
+.credits {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #666;
+}
+
 /* Markers drawn with an emoji instead of a picture */
 .emoji-icon {
   font-size: 28px;
   line-height: 32px;
   text-align: center;
+  filter: drop-shadow(0 0 3px white); /* a soft white glow so markers stand out on the imagery */
 }

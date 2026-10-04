@@ -27,6 +27,22 @@
     <div class="hint">Move with the arrow keys, or click the map to walk there.</div>
   </div>
 
+  <!-- Details about the place where the soldier is standing -->
+  <div id="place-panel">
+    <div class="panel-title">Place details <span id="place-coords"></span></div>
+    <dl>
+      <dt>Elevation</dt>   <dd id="detail-elevation">-</dd>
+      <dt>Weather now</dt> <dd id="detail-weather">-</dd>
+      <dt>Climate</dt>     <dd id="detail-climate">-</dd>
+      <dt>Soil</dt>        <dd id="detail-soil">-</dd>
+      <dt>Land cover</dt>  <dd id="detail-landcover">-</dd>
+      <dt>Wildlife</dt>    <dd id="detail-wildlife">-</dd>
+    </dl>
+    <div class="credits">
+      Data: Open-Meteo · ISRIC SoilGrids · © OpenStreetMap contributors · GBIF
+    </div>
+  </div>
+
   <!-- Leaflet's JavaScript (the mapping library itself) -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
