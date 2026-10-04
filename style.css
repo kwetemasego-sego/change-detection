@@ -13,9 +13,8 @@ body {
   height: 100%;
 }
 
-/* Both floating panels share this look: white, rounded, with a soft shadow */
-#info-panel,
-#place-panel {
+/* The floating panel: white, rounded, with a soft shadow */
+#info-panel {
   position: absolute;
   z-index: 1000; /* keeps the panels above the map */
   padding: 10px 12px;
@@ -36,17 +35,6 @@ body {
   font-size: 14px;
   line-height: 1.5;
   font-variant-numeric: tabular-nums; /* stops numbers jiggling as they change */
-}
-
-/* The place details panel in the bottom-left corner */
-#place-panel {
-  bottom: 24px;
-  left: 10px;
-  width: 320px;
-  max-width: calc(100% - 20px);
-  max-height: 45vh;
-  font-size: 13px;
-  line-height: 1.45;
 }
 
 .panel-title {
@@ -198,18 +186,81 @@ body {
   color: #555;
 }
 
-/* <dl> is a "description list": a label (dt) followed by its value (dd) */
-#place-panel dl {
-  margin: 0;
+/* <dl> is a "description list": a label (dt) followed by its value (dd).
+   Used for the place details, the terrain results and the terrain words. */
+.facts,
+.words {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
-#place-panel dt {
+.facts dt,
+.words dt {
   font-weight: bold;
   margin-top: 4px;
 }
 
-#place-panel dd {
+.facts dd,
+.words dd {
   margin: 0 0 0 10px;
+}
+
+.words {
+  margin-top: 0;
+  font-size: 12px;
+}
+
+.words-title {
+  margin-top: 10px;
+}
+
+/* --- The three result tabs: Changes, Terrain, Place details --- */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #ccc;
+}
+
+.tabs button {
+  flex: 1;
+  padding: 5px 4px;
+  font: inherit;
+  font-size: 13px;
+  border: 1px solid #ccc;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: #f1f1f1;
+  cursor: pointer;
+  margin-bottom: -1px; /* sits on the line, so the chosen tab joins its content */
+}
+
+.tabs button[aria-selected="true"] {
+  background: white;
+  font-weight: bold;
+  border-bottom: 1px solid white;
+}
+
+[role="tabpanel"] {
+  padding-top: 8px;
+}
+
+/* The parts of the Changes tab, separated by a thin line */
+.result-part + .result-part {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #ddd;
+}
+
+/* The "Click to analyse" button while the mode is on */
+#click-mode-button[aria-pressed="true"] {
+  background: #1a5fb4;
+  color: white;
+  border-color: #1a5fb4;
+}
+
+#click-size {
+  font-size: 13px;
 }
 
 .credits {
@@ -328,7 +379,7 @@ details p {
   display: none;
 }
 
-/* --- The time series chart (section 4 of the panel) --- */
+/* --- The charts: the time series (Changes tab) and the elevation profile (Terrain tab) --- */
 #series-progress {
   width: 100%;
   margin-top: 4px;
@@ -339,23 +390,23 @@ details p {
   display: none;
 }
 
-#series-chart svg {
+.chart svg {
   display: block;
   width: 100%;
   height: auto;
   margin-top: 6px;
 }
 
-#series-chart .grid {
+.chart .grid {
   stroke: #e3e3e3;
   stroke-width: 1;
 }
 
-#series-chart .grid.zero {
+.chart .grid.zero {
   stroke: #b5b5b5;
 }
 
-#series-chart .axis-label {
+.chart .axis-label {
   font-size: 10px;
   fill: #666;
 }
@@ -402,6 +453,18 @@ details p {
 .line-swatch.ndvi { background: #2a78d6; }
 .line-swatch.ndbi { background: #eb6834; }
 
+/* The elevation profile's line and the ground under it */
+.chart .profile-line {
+  fill: none;
+  stroke: #8a5a2b;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.chart .profile-ground {
+  fill: rgba(138, 90, 43, 0.15);
+}
+
 /* --- The before/after swipe slider, at the bottom middle of the screen --- */
 #swipe-bar {
   position: absolute;
@@ -438,24 +501,18 @@ details p {
   pointer-events: none; /* clicks go through it to the map */
 }
 
-/* On narrow screens (phones), keep the slider above the place details panel */
 /* The [hidden] attribute must win over "display: flex" above */
 #swipe-bar[hidden] {
   display: none;
 }
 
+/* On narrow screens (phones): the panel stops above the slider and scrolls inside */
 @media (max-width: 760px) {
-  #place-panel {
-    max-height: 30vh;
-  }
-
-  /* Stop above the place details panel (it scrolls inside instead) */
   #info-panel {
-    max-height: calc(100% - 30vh - 44px);
+    max-height: calc(100% - 90px);
   }
 
   #swipe-bar {
-    bottom: calc(30vh + 34px);
     max-width: calc(100% - 20px);
     box-sizing: border-box;
   }

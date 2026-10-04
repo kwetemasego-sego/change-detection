@@ -73,6 +73,17 @@ const SERIES_TRIES = 3; // images to check in each 2-week period before giving u
 const SERIES_SAMPLE_POINTS = 100; // sample the area at up to 100 x 100 points, to keep downloads small
 const SERIES_PARALLEL = 3; // how many periods to check at the same time
 
+// --- Terrain (section 4g) ---
+const TERRAIN_METRES = 30; // the elevation model has one height every 30 m
+const TERRAIN_MAX_KM = 20; // terrain is only worked out for areas up to 20 km x 20 km
+const LOW_LYING_METRES = 5; // ground lower than 5 m above sea level counts as low-lying
+const SLOPING_DEGREES = 2; // ground flatter than 2° doesn't really face any direction
+const SUN_DIRECTION = 315; // the hillshade's sun shines from the north-west (compass degrees)...
+const SUN_HEIGHT = 45; // ...from 45° above the horizon
+
+// --- Click to analyse (section 2) ---
+const CLICK_SQUARE_KM = 2; // the square's size if nothing else is chosen (the page offers 1, 2 or 5 km)
+
 // Microsoft Planetary Computer: a free catalogue of Sentinel-2 images, a
 // service that turns any image into map tiles, and the image files themselves.
 // None of these need an API key. Reading the files needs a free "token"
@@ -82,6 +93,8 @@ const TILE_URL = "https://planetarycomputer.microsoft.com/api/data/v1/item/tiles
 const TOKEN_URL = "https://planetarycomputer.microsoft.com/api/sas/v1/token/sentinel-2-l2a";
 // The same service also cuts out a small piece of an image ("bbox" = the area's edges)
 const CUTOUT_URL = "https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/";
+// ...and gives a free signed web address for reading one file, used for the elevation model
+const SIGN_URL = "https://planetarycomputer.microsoft.com/api/sas/v1/sign?href=";
 
 // =====================================================
 // 1. The map, with satellite photos and labels
@@ -94,6 +107,7 @@ const map = L.map("map", { maxZoom: 19 }).setView([START_LAT, START_LNG], START_
 // but below the street and place names. Higher zIndex = closer to the top.
 map.createPane("beforePane").style.zIndex = 250;
 map.createPane("afterPane").style.zIndex = 260;
+map.createPane("terrainPane").style.zIndex = 280; // the hillshade, over the photos
 map.createPane("changesPane").style.zIndex = 300; // the coloured change layer
 map.createPane("seriesPane").style.zIndex = 320; // a time-series image covers everything below it
 map.createPane("labelsPane").style.zIndex = 350;
@@ -179,6 +193,7 @@ let drawing = false; // true after "Draw area" is pressed, until the box is fini
 let drawStart = null; // the corner where the mouse button went down
 
 drawButton.addEventListener("click", function () {
+  setClickMode(false); // one way of choosing at a time
   drawing = true;
   map.dragging.disable(); // so dragging draws a box instead of moving the map
   map.getContainer().style.cursor = "crosshair";
@@ -211,13 +226,53 @@ useViewButton.addEventListener("click", function () {
   setArea(map.getBounds());
 });
 
-// Remembers the chosen area, shows its size, and looks up details for its centre
+// --- Click to analyse ---
+// While this mode is on, a click on the map chooses a square around that spot
+// and runs the search straight away. While it's off, clicks do what they always did.
+const clickModeButton = document.getElementById("click-mode-button");
+const clickSizeSelect = document.getElementById("click-size");
+clickSizeSelect.value = CLICK_SQUARE_KM;
+let clickMode = false;
+
+clickModeButton.addEventListener("click", function () {
+  setClickMode(!clickMode);
+});
+
+function setClickMode(on) {
+  clickMode = on;
+  clickModeButton.setAttribute("aria-pressed", on ? "true" : "false");
+  map.getContainer().style.cursor = on ? "crosshair" : "";
+  // While it's on, clicks are for analysing: a quick second click shouldn't zoom the map
+  if (on) map.doubleClickZoom.disable();
+  else map.doubleClickZoom.enable();
+  if (on) statusText.textContent = "Click anywhere on the map to analyse a square around it.";
+}
+
+map.on("click", function (event) {
+  if (!clickMode || drawing) return;
+  const box = squareAround(event.latlng, Number(clickSizeSelect.value));
+  // The last 90 days, unless you've chosen your own dates
+  if (!datesChosenByYou) setDefaultDates();
+  runSearch(box, beforeDateInput.value, afterDateInput.value);
+});
+
+// A square "km" kilometres across, centred on a point.
+// (One degree of latitude is about 111.32 km; degrees of longitude get shorter away from the equator.)
+function squareAround(centre, km) {
+  const halfLat = (km / 2) / 111.32;
+  const halfLng = halfLat / Math.cos((centre.lat * Math.PI) / 180);
+  return L.latLngBounds([centre.lat - halfLat, centre.lng - halfLng], [centre.lat + halfLat, centre.lng + halfLng]);
+}
+
+// Remembers the chosen area, shows its size, and looks up details and terrain for it
 function setArea(box) {
   chosenArea = box;
   areaBox.setBounds(box).addTo(map);
   clearComparison(); // images for an old area no longer apply
   copyLinkButton.disabled = false;
   copyLinkStatus.textContent = "";
+  document.getElementById("results-step").hidden = false;
+  analyseTerrain(box); // section 4g: the terrain doesn't depend on the dates
 
   const centre = box.getCenter();
   const widthKm = map.distance(box.getSouthWest(), box.getSouthEast()) / 1000;
@@ -243,11 +298,21 @@ function toDateText(date) {
   return date.toISOString().slice(0, 10);
 }
 
-const today = new Date();
-afterDateInput.value = toDateText(today);
-beforeDateInput.value = toDateText(new Date(today.getTime() - DEFAULT_GAP_DAYS * 24 * 60 * 60 * 1000));
-afterDateInput.max = toDateText(today); // no images from the future!
-beforeDateInput.max = toDateText(today);
+// Today and DEFAULT_GAP_DAYS before it
+function setDefaultDates() {
+  const today = new Date();
+  afterDateInput.value = toDateText(today);
+  beforeDateInput.value = toDateText(new Date(today.getTime() - DEFAULT_GAP_DAYS * 24 * 60 * 60 * 1000));
+  afterDateInput.max = toDateText(today); // no images from the future!
+  beforeDateInput.max = toDateText(today);
+}
+setDefaultDates();
+
+// Becomes true once you change a date yourself. Click to analyse then uses your dates.
+let datesChosenByYou = false;
+for (const input of [beforeDateInput, afterDateInput]) {
+  input.addEventListener("change", function () { datesChosenByYou = true; });
+}
 
 // =====================================================
 // 3b. Finding a place, examples, and links to share
@@ -358,16 +423,18 @@ function runSearch(box, before, after) {
 
 // --- Links to share ---
 // The area and dates are kept in the web address, e.g.
-//   ...?area=24.38120,54.54020,24.39920,54.56000&before=2026-07-03&after=2026-10-01
-// (area = south, west, north, east). Opening such a link shows the same search.
+//   ...?area=24.38120,54.54020,24.39920,54.56000&before=2026-07-03&after=2026-10-01&tab=terrain
+// (area = south, west, north, east). Opening such a link shows the same search,
+// on the same results tab ("tab" is left out for the Changes tab).
 const copyLinkButton = document.getElementById("copy-link-button");
 const copyLinkStatus = document.getElementById("copy-link-status");
 
-function shareLink(box, before, after) {
+function shareLink(box, before, after, tab) {
   const edges = [box.getSouth(), box.getWest(), box.getNorth(), box.getEast()];
   return location.origin + location.pathname +
     "?area=" + edges.map(function (n) { return n.toFixed(5); }).join(",") +
-    "&before=" + before + "&after=" + after;
+    "&before=" + before + "&after=" + after +
+    (tab && tab !== "changes" ? "&tab=" + tab : "");
 }
 
 // Reads the area and dates from the web address. Returns null if there are
@@ -389,7 +456,8 @@ function readSharedSearch(search) {
   if (!isDate(before) || !isDate(after) || before >= after || after > toDateText(new Date())) {
     return { error: "The link's dates aren't valid: the before date must be earlier than the after date, and not in the future." };
   }
-  return { box: L.latLngBounds([south, west], [north, east]), before: before, after: after };
+  const tab = TABS.includes(parameters.get("tab")) ? parameters.get("tab") : "changes";
+  return { box: L.latLngBounds([south, west], [north, east]), before: before, after: after, tab: tab };
 }
 
 // Opens the search in the web address, if there is one (called at the end of this file)
@@ -401,11 +469,12 @@ function openSharedLink() {
     return;
   }
   runSearch(shared.box, shared.before, shared.after);
+  showTab(shared.tab);
 }
 
 copyLinkButton.addEventListener("click", async function () {
   if (!chosenArea) return;
-  const link = shareLink(chosenArea, beforeDateInput.value, afterDateInput.value);
+  const link = shareLink(chosenArea, beforeDateInput.value, afterDateInput.value, currentTab);
   try {
     await navigator.clipboard.writeText(link);
     copyLinkStatus.textContent = "Link copied. Anyone who opens it sees this area and these dates.";
@@ -419,6 +488,27 @@ copyLinkButton.addEventListener("click", async function () {
     box.select();
   }
 });
+
+// --- The result tabs: Changes, Terrain and Place details ---
+const TABS = ["changes", "terrain", "place"];
+let currentTab = "changes";
+
+for (const name of TABS) {
+  document.getElementById("tab-" + name).addEventListener("click", function () { showTab(name); });
+}
+
+function showTab(name) {
+  currentTab = name;
+  for (const other of TABS) {
+    document.getElementById("tab-" + other).setAttribute("aria-selected", other === name ? "true" : "false");
+    document.getElementById("panel-" + other).hidden = other !== name;
+  }
+  showProfileLine(); // the profile's dashed line is only on the map with the Terrain tab (section 4g)
+  // If the web address holds a search, keep its tab up to date too
+  if (chosenArea && new URLSearchParams(location.search).has("area")) {
+    history.replaceState(null, "", shareLink(chosenArea, beforeDateInput.value, afterDateInput.value, currentTab));
+  }
+}
 
 // =====================================================
 // 4. Finding the clearest Sentinel-2 image near a date
@@ -650,9 +740,15 @@ function projectGrid(grid, item) {
 // The image server sometimes drops a connection when many files are read at
 // once, so if a read fails we wait a moment and try again (up to 3 times).
 async function readBandOnGrid(item, bandName, token, projected) {
+  return readFileOnGrid(item.assets[bandName].href + "?" + token, projected);
+}
+
+// The same for any Cloud-Optimized GeoTIFF file, given its full web address
+// (also used for the elevation files in section 4g)
+async function readFileOnGrid(url, projected) {
   for (let attempt = 1; ; attempt++) {
     try {
-      return await readBandOnGridOnce(item, bandName, token, projected);
+      return await readFileOnGridOnce(url, projected);
     } catch (error) {
       if (attempt >= 3) throw error; // give up after the third try
       await new Promise(function (resolve) {
@@ -662,10 +758,10 @@ async function readBandOnGrid(item, bandName, token, projected) {
   }
 }
 
-async function readBandOnGridOnce(item, bandName, token, projected) {
-  const tiff = await GeoTIFF.fromUrl(item.assets[bandName].href + "?" + token);
+async function readFileOnGridOnce(url, projected) {
+  const tiff = await GeoTIFF.fromUrl(url);
   const fullImage = await tiff.getImage();
-  const [originX, originY] = fullImage.getOrigin(); // UTM position of the file's top-left corner
+  const [originX, originY] = fullImage.getOrigin(); // position of the file's top-left corner (UTM, or degrees)
   const [fullPixelWidth, fullPixelHeight] = fullImage.getResolution(); // e.g. 10 and -10 (rows go south)
 
   // Each file also holds smaller copies of the photo ("overviews"), each half
@@ -692,6 +788,9 @@ async function readBandOnGridOnce(item, bandName, token, projected) {
   const right = Math.min(image.getWidth(), Math.ceil((projected.maxX - originX) / pixelWidth) + 1);
   const top = Math.max(0, Math.floor((projected.maxY - originY) / pixelHeight) - 1);
   const bottom = Math.min(image.getHeight(), Math.ceil((projected.minY - originY) / pixelHeight) + 1);
+  if (right <= left || bottom <= top) {
+    return new Float32Array(projected.xs.length).fill(NaN); // the file doesn't cover any of the points
+  }
 
   // Download just that block
   const [pixels] = await image.readRasters({ window: [left, top, right, bottom] });
@@ -1040,6 +1139,7 @@ function showSummary(counts, totalSquares) {
   document.getElementById("change-total").textContent = numbers.totalSentence;
   document.getElementById("pct-skipped").textContent = numbers.skipped;
   changeSection.hidden = false;
+  document.getElementById("changes-empty").hidden = true;
 }
 
 // Says how much of "new buildings or bare ground" was found by brightening alone
@@ -1119,7 +1219,7 @@ findButton.addEventListener("click", async function () {
   }
 
   // Keep this search in the web address, so it can be shared or bookmarked (section 3b)
-  history.replaceState(null, "", shareLink(chosenArea, beforeDateInput.value, afterDateInput.value));
+  history.replaceState(null, "", shareLink(chosenArea, beforeDateInput.value, afterDateInput.value, currentTab));
   clearComparison();
   findButton.disabled = true;
   statusText.textContent = "Searching for Sentinel-2 images and checking clouds over your area…";
@@ -2206,7 +2306,7 @@ async function makeReport(result) {
     { grey: true, size: 9 });
 
   // --- Time series (only if it has finished loading) ---
-  const chart = await seriesChartPicture();
+  const chart = series.length ? await chartPicture(seriesChart) : null;
   if (chart) {
     heading("Over time");
     picture(chart.dataUrl, chart.width, chart.height, 150, 85);
@@ -2220,6 +2320,26 @@ async function makeReport(result) {
     paragraph("The average score over the area's clear, dry-land squares in " + series.length +
       " clear images (at most " + SERIES_MAX_CLOUD + "% of the area hidden), about one every " +
       SERIES_STEP_DAYS + " days, all from the same satellite path as the before image.", { grey: true, size: 9 });
+  }
+
+  // --- Terrain (only if it has finished loading for this area) ---
+  const terrain = lastTerrain && lastTerrain.area === result.area ? lastTerrain : null;
+  if (terrain) {
+    heading("Terrain");
+    for (const [name, text] of terrainLines(terrain)) {
+      paragraph(name + ": " + text + ".");
+    }
+    const profile = await chartPicture(profileChart);
+    if (profile) {
+      makeRoom(90); // keep the caption on the same page as the chart under it
+      paragraph("Elevation profile from west to east, along the middle of the area:", { grey: true, size: 9 });
+      picture(profile.dataUrl, profile.width, profile.height, 150, 80);
+    }
+    paragraph("From the Copernicus DEM GLO-30, which gives the height of the surface every 30 m. In towns the " +
+      "heights include buildings and trees, so the steepest slope may be the edge of a building.", { grey: true, size: 9 });
+    for (const [word, meaning] of TERRAIN_WORDS) {
+      bullet(word + ": " + meaning);
+    }
   }
 
   // --- Method ---
@@ -2279,6 +2399,11 @@ async function makeReport(result) {
     "data is free to use under the Legal Notice on the use of Copernicus Sentinel Data.");
   paragraph("Images found, read and cut out through Microsoft Planetary Computer " +
     "(https://planetarycomputer.microsoft.com/).");
+  if (terrain) {
+    paragraph("Elevation: Copernicus DEM GLO-30, © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH " +
+      "2014-2018, provided under COPERNICUS by the European Union and ESA; all rights reserved. Read through " +
+      "Microsoft Planetary Computer.");
+  }
   paragraph("Made with Leaflet, geotiff.js, proj4js and jsPDF.");
 
   // Page numbers at the bottom of every page
@@ -2320,12 +2445,12 @@ async function changeMapPicture(result, widthMetres, heightMetres) {
   return { dataUrl: canvas.toDataURL("image/jpeg", 0.9), width: width, height: height };
 }
 
-// The time series chart as a picture, or null if there isn't one yet.
-// The chart's colours and fonts come from style.css, which a picture made from
-// the SVG on its own wouldn't have, so they're copied onto each part first.
-async function seriesChartPicture() {
-  const svg = seriesChart.querySelector("svg");
-  if (!svg || series.length === 0) return null;
+// A chart (the time series or the elevation profile) as a picture, or null if
+// there isn't one. The chart's colours and fonts come from style.css, which a
+// picture made from the SVG on its own wouldn't have, so they're copied onto each part first.
+async function chartPicture(container) {
+  const svg = container.querySelector("svg");
+  if (!svg) return null;
 
   const copy = svg.cloneNode(true);
   const originals = svg.querySelectorAll("*");
@@ -2396,6 +2521,7 @@ function clearComparison() {
   beforeInfo.textContent = "-";
   afterInfo.textContent = "-";
   changeSection.hidden = true;
+  document.getElementById("changes-empty").hidden = false;
   seasonNote.hidden = true;
   yearCheckText.textContent = "";
   yearCheckButton.hidden = false;
@@ -2407,6 +2533,317 @@ function clearComparison() {
   clearTimeSeries();
   swipeBar.hidden = true;
   swipeLine.hidden = true;
+}
+
+// =====================================================
+// 4g. Terrain: elevation, slope, aspect, low-lying ground and hillshade
+// =====================================================
+// The Copernicus DEM ("digital elevation model") gives the height of the
+// surface above sea level every 30 m, for the whole world. It's a surface
+// model: in towns the heights include buildings and trees. Planetary Computer
+// stores it as Cloud-Optimized GeoTIFFs in 1° x 1° tiles, which we read just
+// like the Sentinel-2 bands. Its files need a free signed web address (SIGN_URL).
+//   Slope = how steep the ground is, from 0° (flat) to 90° (a wall).
+//   Aspect = the compass direction a slope faces, looking downhill.
+//   Hillshade = a grey picture of the ground lit by a low sun, so hills and valleys stand out.
+//   Low-lying = ground less than LOW_LYING_METRES above sea level.
+
+const terrainStatus = document.getElementById("terrain-status");
+const terrainResults = document.getElementById("terrain-results");
+const hillshadeButton = document.getElementById("hillshade-button");
+const profileChart = document.getElementById("profile-chart");
+
+// The terrain words, explained in one sentence each (the same as on the page)
+const TERRAIN_WORDS = [
+  ["Elevation", "How high the ground is above sea level."],
+  ["Slope", "How steep the ground is, from 0° (flat) to 90° (a wall)."],
+  ["Aspect", "The compass direction a slope faces, looking downhill."],
+  ["Hillshade", "A grey picture of the ground lit by a low sun from the north-west, so hills and valleys stand out."],
+  ["Low-lying", "Ground less than " + LOW_LYING_METRES + " m above sea level, which is most at risk from floods and high tides."],
+  ["Elevation profile", "A chart of how high the ground is along a line across the square."]
+];
+
+// Put the words on the page, in the Terrain tab
+for (const [word, meaning] of TERRAIN_WORDS) {
+  const term = document.createElement("dt");
+  term.textContent = word;
+  const explanation = document.createElement("dd");
+  explanation.textContent = meaning;
+  document.getElementById("terrain-words").append(term, explanation);
+}
+
+// The directions slopes can face, every 45° clockwise from north
+const ASPECT_NAMES = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"];
+
+let lastTerrain = null; // the latest terrain results (null = none)
+let terrainNumber = 0; // like lookupNumber: answers for an older area are ignored
+let hillshadeLayer = null;
+let profileLine = null; // the dashed line on the map along the elevation profile
+
+async function analyseTerrain(area) {
+  terrainNumber = terrainNumber + 1;
+  const thisTerrain = terrainNumber;
+  clearTerrain();
+
+  const widthMetres = map.distance(area.getSouthWest(), area.getSouthEast());
+  const heightMetres = map.distance(area.getSouthWest(), area.getNorthWest());
+  if (widthMetres > TERRAIN_MAX_KM * 1000 || heightMetres > TERRAIN_MAX_KM * 1000) {
+    terrainStatus.textContent = "Terrain is only worked out for areas up to " + TERRAIN_MAX_KM + " km × " +
+      TERRAIN_MAX_KM + " km. Choose a smaller area to see it.";
+    return;
+  }
+  terrainStatus.textContent = "Reading the elevation model…";
+  try {
+    const grid = makeGrid(area, TERRAIN_METRES);
+    // The free services sometimes drop a request, so try once more before giving up
+    const heights = await readElevation(area, grid).catch(function () { return readElevation(area, grid); });
+    if (thisTerrain !== terrainNumber) return; // a newer area was chosen meanwhile
+    const terrain = analyseHeights(heights, grid.columns, grid.rows, widthMetres / grid.columns, heightMetres / grid.rows);
+    if (!terrain) {
+      terrainStatus.textContent = "The elevation model has no heights for this area.";
+      return;
+    }
+    lastTerrain = Object.assign({ area: area, grid: grid }, terrain);
+    showTerrain(lastTerrain);
+  } catch (error) {
+    if (thisTerrain !== terrainNumber) return;
+    console.warn("Terrain failed:", error);
+    terrainStatus.textContent = "Sorry, the elevation model couldn't be read. Please try again in a moment.";
+  }
+}
+
+// Finds the elevation tiles that cover the area and reads the height at every grid point
+async function readElevation(area, grid) {
+  const edges = [area.getWest(), area.getSouth(), area.getEast(), area.getNorth()];
+  const found = await fetchJson(STAC_SEARCH_URL + "?collections=cop-dem-glo-30&bbox=" + edges.join(",") + "&limit=10");
+  // The tiles use latitude and longitude, so the grid points need no converting.
+  // ("metres: 0" means always read the full 30 m detail.)
+  const points = {
+    xs: grid.lngs, ys: grid.lats, metres: 0,
+    minX: area.getWest(), maxX: area.getEast(), minY: area.getSouth(), maxY: area.getNorth()
+  };
+  const heights = new Float32Array(grid.lats.length).fill(NaN);
+  // An area can cross the edge of a tile, so each tile fills in the points it covers
+  for (const tile of found.features) {
+    const signed = await fetchJson(SIGN_URL + encodeURIComponent(tile.assets.data.href));
+    const values = await readFileOnGrid(signed.href, points);
+    for (let i = 0; i < values.length; i++) {
+      if (values[i] > -1000) heights[i] = values[i]; // leaves out "no data" (NaN, or -32767)
+    }
+  }
+  return heights;
+}
+
+// Works out the terrain numbers from a grid of heights (row by row from the
+// north-west corner). cellWidth and cellHeight are the grid squares' size in metres.
+// Returns null if there are no heights at all.
+function analyseHeights(heights, columns, rows, cellWidth, cellHeight) {
+  const slope = new Float32Array(heights.length).fill(NaN); // degrees
+  const shade = new Float32Array(heights.length).fill(NaN); // 0 = dark, 1 = fully lit
+  const facing = new Array(8).fill(0); // how many sloping squares face each direction
+  let count = 0, total = 0, lowest = Infinity, highest = -Infinity, lowLying = 0;
+  let slopeCount = 0, slopeTotal = 0, steepest = 0, sloping = 0;
+
+  // The sun for the hillshade, as a direction: east, north and up parts
+  const sunAround = (SUN_DIRECTION * Math.PI) / 180;
+  const sunUp = (SUN_HEIGHT * Math.PI) / 180;
+  const sun = [Math.sin(sunAround) * Math.cos(sunUp), Math.cos(sunAround) * Math.cos(sunUp), Math.sin(sunUp)];
+
+  function heightAt(row, column) {
+    return heights[row * columns + column];
+  }
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      const i = row * columns + column;
+      const z = heights[i];
+      if (isNaN(z)) continue;
+      count++;
+      total += z;
+      lowest = Math.min(lowest, z);
+      highest = Math.max(highest, z);
+      if (z < LOW_LYING_METRES) lowLying++;
+
+      // How fast the ground rises going east and going north, from the
+      // neighbours on each side (just one side at the edges)
+      const west = Math.max(0, column - 1), east = Math.min(columns - 1, column + 1);
+      const north = Math.max(0, row - 1), south = Math.min(rows - 1, row + 1); // rows go south
+      if (east === west || north === south) continue; // a single row or column has no slope
+      const riseEast = (heightAt(row, east) - heightAt(row, west)) / ((east - west) * cellWidth);
+      const riseNorth = (heightAt(north, column) - heightAt(south, column)) / ((south - north) * cellHeight);
+      if (isNaN(riseEast) || isNaN(riseNorth)) continue;
+
+      // Slope: the angle of the steepest rise
+      const degrees = (Math.atan(Math.hypot(riseEast, riseNorth)) * 180) / Math.PI;
+      slope[i] = degrees;
+      slopeCount++;
+      slopeTotal += degrees;
+      steepest = Math.max(steepest, degrees);
+
+      // Hillshade: how directly the sun shines on the ground. The ground faces
+      // the direction (-riseEast, -riseNorth, 1); the more that points at the sun, the brighter.
+      shade[i] = Math.max(0, (-riseEast * sun[0] - riseNorth * sun[1] + sun[2]) / Math.hypot(riseEast, riseNorth, 1));
+
+      // Aspect: the compass direction of downhill (0° = north, 90° = east)
+      if (degrees >= SLOPING_DEGREES) {
+        sloping++;
+        const compass = ((Math.atan2(-riseEast, -riseNorth) * 180) / Math.PI + 360) % 360;
+        facing[Math.round(compass / 45) % 8]++;
+      }
+    }
+  }
+  if (count === 0) return null;
+
+  // The main direction slopes face: the one most sloping squares face. If hardly
+  // any ground slopes (under 5%), there isn't one.
+  let aspect = null;
+  if (sloping >= 0.05 * slopeCount && sloping > 0) {
+    const most = facing.indexOf(Math.max(...facing));
+    aspect = { name: ASPECT_NAMES[most], share: facing[most] / sloping };
+  }
+
+  // The elevation profile: west to east along the middle row
+  const middleRow = Math.floor(rows / 2);
+  const profile = [];
+  for (let column = 0; column < columns; column++) {
+    const z = heightAt(middleRow, column);
+    if (!isNaN(z)) profile.push({ metres: (column + 0.5) * cellWidth, height: z });
+  }
+
+  return {
+    lowest: lowest, highest: highest, average: total / count,
+    averageSlope: slopeCount ? slopeTotal / slopeCount : 0, steepest: steepest,
+    slopingShare: slopeCount ? sloping / slopeCount : 0, aspect: aspect,
+    lowLyingShare: lowLying / count,
+    slope: slope, shade: shade, profile: profile, middleRow: middleRow, columns: columns, rows: rows,
+    widthMetres: columns * cellWidth
+  };
+}
+
+// The terrain results as words, e.g. ["Elevation", "lowest 2 m, ..."], for the page and the report
+function terrainLines(t) {
+  return [
+    ["Elevation", "lowest " + Math.round(t.lowest) + " m, highest " + Math.round(t.highest) + " m, average " +
+      Math.round(t.average) + " m above sea level"],
+    ["Slope", "average " + t.averageSlope.toFixed(1) + "°, steepest " + Math.round(t.steepest) + "°"],
+    ["Aspect", t.aspect
+      ? "slopes mostly face " + t.aspect.name + " (" + Math.round(100 * t.aspect.share) + "% of the sloping ground)"
+      : "too flat to face any one way (" + Math.round(100 * t.slopingShare) + "% of the ground slopes " +
+        SLOPING_DEGREES + "° or more)"],
+    ["Low-lying", formatPercent(t.lowLyingShare) + " of the area is less than " + LOW_LYING_METRES + " m above sea level"]
+  ];
+}
+
+// 0.123 → "12%", with "<1%" for a little but not zero
+function formatPercent(share) {
+  return share > 0 && share < 0.005 ? "<1%" : Math.round(100 * share) + "%";
+}
+
+function showTerrain(t) {
+  terrainStatus.textContent = "";
+  const ids = ["terrain-elevation", "terrain-slope", "terrain-aspect", "terrain-low"];
+  terrainLines(t).forEach(function ([, text], k) {
+    document.getElementById(ids[k]).textContent = text[0].toUpperCase() + text.slice(1);
+  });
+  terrainResults.hidden = false;
+
+  // The hillshade picture, one grey picture-pixel per 30 m square
+  const canvas = document.createElement("canvas");
+  canvas.width = t.columns;
+  canvas.height = t.rows;
+  const context = canvas.getContext("2d");
+  const picture = context.createImageData(t.columns, t.rows);
+  for (let i = 0; i < t.shade.length; i++) {
+    if (isNaN(t.shade[i])) continue; // no height: left see-through
+    const grey = Math.round(255 * t.shade[i]);
+    picture.data.set([grey, grey, grey, 255], i * 4);
+  }
+  context.putImageData(picture, 0, 0);
+  hillshadeLayer = L.imageOverlay(canvas.toDataURL(), t.area, {
+    pane: "terrainPane", opacity: 0.85, interactive: false,
+    attribution: "Elevation: Copernicus DEM GLO-30 &copy; DLR e.V., &copy; Airbus Defence and Space GmbH"
+  });
+  hillshadeButton.textContent = "Show hillshade";
+
+  // The profile's line on the map, along the middle row of the grid
+  const lat = t.grid.lats[t.middleRow * t.columns];
+  profileLine = L.polyline([[lat, t.area.getWest()], [lat, t.area.getEast()]], {
+    color: "#8a5a2b", weight: 3, dashArray: "6 6", interactive: false
+  });
+  showProfileLine();
+  drawProfileChart(t);
+}
+
+hillshadeButton.addEventListener("click", function () {
+  if (!hillshadeLayer) return;
+  if (map.hasLayer(hillshadeLayer)) {
+    hillshadeLayer.remove();
+    hillshadeButton.textContent = "Show hillshade";
+  } else {
+    hillshadeLayer.addTo(map);
+    hillshadeButton.textContent = "Hide hillshade";
+  }
+});
+
+// The dashed profile line is on the map only while the Terrain tab is open
+function showProfileLine() {
+  if (!profileLine) return;
+  if (currentTab === "terrain") profileLine.addTo(map);
+  else profileLine.remove();
+}
+
+function clearTerrain() {
+  if (hillshadeLayer) hillshadeLayer.remove();
+  if (profileLine) profileLine.remove();
+  hillshadeLayer = null;
+  profileLine = null;
+  lastTerrain = null;
+  terrainResults.hidden = true;
+  profileChart.innerHTML = "";
+  terrainStatus.textContent = "";
+}
+
+// The elevation profile chart: height (left) against distance from the west edge (bottom)
+function drawProfileChart(t) {
+  if (t.profile.length < 2) {
+    profileChart.textContent = "No heights along the line.";
+    return;
+  }
+  const width = 276, height = 140;
+  const left = 44, right = 8, top = 8, bottom = 20;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const heights = t.profile.map(function (point) { return point.height; });
+  // The vertical range, at least 10 m, so flat ground doesn't look hilly
+  let low = Math.floor(Math.min(...heights));
+  let high = Math.ceil(Math.max(...heights));
+  if (high - low < 10) {
+    const middle = (high + low) / 2;
+    low = Math.floor(middle - 5);
+    high = low + 10;
+  }
+  function xFor(metres) { return left + (metres / t.widthMetres) * plotWidth; }
+  function yFor(z) { return top + ((high - z) / (high - low)) * plotHeight; }
+
+  let svg = "";
+  for (const z of [low, (low + high) / 2, high]) {
+    const y = yFor(z).toFixed(1);
+    svg += '<line x1="' + left + '" x2="' + (width - right) + '" y1="' + y + '" y2="' + y + '" class="grid"/>';
+    svg += '<text x="' + (left - 4) + '" y="' + y + '" class="axis-label" text-anchor="end" dy="0.32em">' +
+           Math.round(z) + " m</text>";
+  }
+  svg += '<text x="' + left + '" y="' + (height - 4) + '" class="axis-label">West</text>';
+  svg += '<text x="' + (width - right) + '" y="' + (height - 4) + '" class="axis-label" text-anchor="end">East, ' +
+         (t.widthMetres / 1000).toFixed(1) + " km</text>";
+  const points = t.profile.map(function (point) {
+    return xFor(point.metres).toFixed(1) + "," + yFor(point.height).toFixed(1);
+  });
+  const baseline = (top + plotHeight).toFixed(1);
+  svg += '<polygon class="profile-ground" points="' + xFor(t.profile[0].metres).toFixed(1) + "," + baseline + " " +
+         points.join(" ") + " " + xFor(t.profile[t.profile.length - 1].metres).toFixed(1) + "," + baseline + '"/>';
+  svg += '<polyline class="profile-line" points="' + points.join(" ") + '"/>';
+  profileChart.innerHTML =
+    '<svg viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="Elevation profile from west to east: ' +
+    "from " + Math.round(Math.min(...heights)) + " to " + Math.round(Math.max(...heights)) + ' m">' + svg + "</svg>";
 }
 
 // =====================================================

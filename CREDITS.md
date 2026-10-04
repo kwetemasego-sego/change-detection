@@ -11,6 +11,14 @@ Copernicus Sentinel data is free to use, including commercially, under the
 Found, read and displayed through **[Microsoft Planetary Computer](https://planetarycomputer.microsoft.com/)**
 (its STAC catalogue, data tile service and image files, read with its free anonymous token), used without an API key.
 
+## Elevation (the Terrain tab)
+
+**Copernicus DEM GLO-30**, heights every 30 m: © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018,
+provided under COPERNICUS by the European Union and ESA; all rights reserved. Free to use, with this credit, under the
+[Copernicus DEM licence](https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM).
+Read through **[Microsoft Planetary Computer](https://planetarycomputer.microsoft.com/dataset/cop-dem-glo-30)**, which gives
+a free signed address for each file, used without an API key. The credit is also shown in the Terrain tab and in the PDF report.
+
 ## Code
 
 **[Leaflet](https://leafletjs.com/)** 1.9.4, the interactive map library.
@@ -38,7 +46,7 @@ The release badge in the README comes from [Shields.io](https://shields.io/).
 The background satellite imagery, street labels, place labels and the street map come from **Esri** (ArcGIS Online basemaps), used without an API key. The required credits are shown in the bottom-right corner of the map.
 Sources: Esri, Maxar, Earthstar Geographics, HERE, Garmin, USGS, © OpenStreetMap contributors, and the GIS user community.
 
-## Data in the place details panel
+## Data in the Place details tab
 
 | Data | Source | License |
 |---|---|---|

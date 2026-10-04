@@ -24,6 +24,63 @@ test("Khalifa City south: the white plot is found and the seasons are checked", 
   assert.deepEqual(site.pageErrors, []);
 });
 
+// Waits for the terrain of the chosen area, then returns its numbers
+async function terrainOfChosenArea(page) {
+  await page.waitForFunction(function () {
+    return (lastTerrain && lastTerrain.area === chosenArea) || /Sorry/.test(document.getElementById("terrain-status").textContent);
+  }, { timeout: 120000 });
+  return page.evaluate(function () {
+    if (!lastTerrain) return { error: document.getElementById("terrain-status").textContent };
+    const t = lastTerrain;
+    return { lowest: t.lowest, highest: t.highest, averageSlope: t.averageSlope, steepest: t.steepest,
+      aspect: t.aspect, lowLyingShare: t.lowLyingShare, profilePoints: t.profile.length };
+  });
+}
+
+test("terrain of flat Khalifa City south, and the PDF report includes it", { timeout: 900000 }, async function () {
+  // The page still shows Khalifa City south from the first test
+  const t = await terrainOfChosenArea(site.page);
+  console.log("Khalifa City south terrain " + JSON.stringify(t));
+  assert.ok(!t.error, t.error);
+  assert.ok(t.highest < 50, "low coastal ground");
+  assert.ok(t.averageSlope < 5, "flat on average");
+  assert.ok(t.lowLyingShare > 0.3, "much of it under 5 m");
+  assert.ok(t.profilePoints > 50, "a profile across the 2 km square");
+
+  // The report's text has a Terrain section with the four results and the elevation credit
+  const written = await site.page.evaluate(async function () {
+    const lines = [];
+    const Original = window.jspdf.jsPDF;
+    window.jspdf.jsPDF = function (...args) {
+      const doc = new Original(...args);
+      const text = doc.text;
+      doc.text = function (t, ...rest) { lines.push([].concat(t).join(" ")); return text.call(doc, t, ...rest); };
+      return doc;
+    };
+    await makeReport(lastResult);
+    window.jspdf.jsPDF = Original;
+    return lines.join(" ");
+  });
+  for (const words of ["Terrain", "Elevation: lowest", "Slope: average", "Aspect:", "Low-lying:", "Copernicus DEM GLO-30"]) {
+    assert.ok(written.includes(words), "the report mentions " + words);
+  }
+});
+
+test("terrain of hilly Jebel Hafeet", { timeout: 300000 }, async function () {
+  await site.page.evaluate(function () {
+    setArea(squareAround(L.latLng(24.059, 55.776), 2));
+  });
+  const t = await terrainOfChosenArea(site.page);
+  console.log("Jebel Hafeet terrain " + JSON.stringify(t));
+  assert.ok(!t.error, t.error);
+  assert.ok(t.highest > 900, "a mountain: higher than 900 m");
+  assert.ok(t.highest - t.lowest > 400, "more than 400 m from bottom to top");
+  assert.ok(t.averageSlope > 15, "steep on average");
+  assert.ok(t.steepest > 40, "some very steep slopes");
+  assert.equal(t.lowLyingShare, 0, "nothing low-lying");
+  assert.ok(t.aspect, "slopes face a main direction");
+});
+
 test("a shared link to Khalifa City south gives the same result", { timeout: 900000 }, async function () {
   const page = await site.browser.newPage();
   const errors = [];

@@ -49,4 +49,23 @@ async function openSite() {
   return { page: page, pageErrors: pageErrors, close: close, url: url, browser: browser };
 }
 
-module.exports = { openSite };
+// Opens the site in a new tab with only the site and its code libraries
+// allowed through: satellite images, elevation, map pictures and place details
+// are all blocked, so a test is quick and doesn't use those free services.
+// "query" is added to the address, e.g. "?area=...".
+async function openOfflinePage(site, query) {
+  const page = await site.browser.newPage();
+  await page.setViewport({ width: 1400, height: 900 });
+  const errors = [];
+  page.on("pageerror", function (error) { errors.push(error.message); });
+  await page.setRequestInterception(true);
+  page.on("request", function (request) {
+    const host = new URL(request.url()).hostname;
+    if (host === "127.0.0.1" || /unpkg\.com|jsdelivr\.net|cdnjs\.cloudflare\.com/.test(host)) request.continue();
+    else request.abort();
+  });
+  await page.goto(site.url + (query || ""), { waitUntil: "load" });
+  return { page: page, errors: errors };
+}
+
+module.exports = { openSite, openOfflinePage };

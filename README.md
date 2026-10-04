@@ -3,9 +3,9 @@
 [![Tests](https://github.com/kwetemasego-sego/change-detection/actions/workflows/tests.yml/badge.svg)](https://github.com/kwetemasego-sego/change-detection/actions/workflows/tests.yml)
 [![Latest release](https://img.shields.io/github/v/release/kwetemasego-sego/change-detection)](https://github.com/kwetemasego-sego/change-detection/releases/latest)
 
-See what changed in a place over a few months, using free Sentinel-2 satellite images.
+See what changed in a place over a few months, using free Sentinel-2 satellite images, and what its terrain is like.
 
-Draw an area on the map and pick two dates. The tool finds the clearest satellite photo near each date, lets you swipe between them, and colours in what changed: plants that grew or disappeared, new buildings or bare ground, and burned land. It warns when plant changes may just be the seasons, and can check them against a year earlier.
+Draw an area on the map, or click a spot, and pick two dates. The tool finds the clearest satellite photo near each date, lets you swipe between them, and colours in what changed: plants that grew or disappeared, new buildings or bare ground, and burned land. It warns when plant changes may just be the seasons, and can check them against a year earlier. For the same area it also works out the terrain from a 30 m elevation model: how high, how steep, which way slopes face, how much is low-lying, a hillshade and an elevation profile.
 
 **Live site: https://kwetemasego-sego.github.io/change-detection/**
 
@@ -23,12 +23,15 @@ It runs entirely in your web browser. There is no server and no API key: it is j
    - Or press one of the **examples** (*Khalifa City: white fill*, *Lulu Island: earthworks*, *Al Mushrif: seasonal greening*). Each one sets an area and dates from the [validation tests](VALIDATION.md) and finds the images straight away.
 2. **Choose an area**:
    - Press **Draw area**, then press and drag a box on the map, *or*
-   - Press **Use visible area** to use everything on screen (easiest on phones).
+   - Press **Use visible area** to use everything on screen (easiest on phones), *or*
+   - Press **Click to analyse** (it turns blue) and click anywhere on the map. It draws a square around the spot (2 km across, or 1 or 5 km if you choose under **Square**) and runs everything straight away, for the last 90 days unless you've changed the dates yourself. Until you press the button again (or **Draw area**), each click on the map analyses a new square, and double-clicks don't zoom.
 3. **Choose two dates.** They start as today and 90 days ago. Change them if you like.
-4. **Press Find images.** After a few seconds you'll see:
-   - **Before image** and **After image**: the dates of the photos it chose, and how cloudy each was over your area.
-   - **Changes found**: coloured squares on the map, and a summary in the panel.
+4. **Press Find images.** After a few seconds you'll see the **Before image** and **After image** (the dates of the photos it chose, and how cloudy each was over your area), and the results in three tabs:
+   - **Changes**: coloured squares on the map, a summary, and the chart over time (steps 6 and 7).
+   - **Terrain**: the area's height, slopes and low-lying ground, a hillshade and an elevation profile (see [Terrain](#terrain) below).
    - **Place details** for the centre of your area: elevation, weather, climate, soil, land cover and wildlife.
+
+   Terrain and Place details appear as soon as you choose an area, without waiting for the images.
 5. **Drag the slider** at the bottom to swipe between the before photo (left of the line) and the after photo (right of the line).
 6. **Press Hide changes** to see the photos without the coloured squares, and **Show changes** to bring them back.
    - If the two photos are from **different seasons** (say summer and autumn), a yellow note warns that some plant changes may just be the time of year. Press **Compare with a year earlier** to check: the after photo is compared with one from the same time a year before (from the same satellite path if possible). The note then says how much of your plant change doesn't show up a year apart, so is probably seasonal. **Show year-apart changes** puts that comparison on the map, and **Show your dates' changes** switches back.
@@ -37,7 +40,7 @@ It runs entirely in your web browser. There is no server and no API key: it is j
    - **Press Play** for a timelapse of all the photos in date order. **Speed** sets how long each one stays on screen.
    - **Back to before/after**, or moving the swipe slider, returns to the before/after comparison.
 8. **Download** the results (made in your browser, nothing is uploaded):
-   - **Download report** saves a PDF: a map of the changes on the after photo, the two images' dates and cloud, the summary in hectares and percentages (with how much was bright new surface), the seasonal warning and the year-apart check if they apply, the time series chart (if it has finished loading), how the changes were found, the limits and the data credits.
+   - **Download report** saves a PDF: a map of the changes on the after photo, the two images' dates and cloud, the summary in hectares and percentages (with how much was bright new surface), the seasonal warning and the year-apart check if they apply, the time series chart (if it has finished loading), the terrain results and elevation profile (if they have loaded), how the changes were found, the limits and the data credits.
    - **Download GeoJSON** saves the changed areas as map shapes for GIS software, or for viewing at [geojson.io](https://geojson.io/). Touching squares of the same kind of change are joined into one shape. Each shape has `change` (its kind), `area_ha`, `area_m2`, `squares`, and the two image dates, plus colours that geojson.io shows.
 
 ### Sharing a search
@@ -48,7 +51,26 @@ Press **Copy link** (next to **Find images**) to copy a web address with your ar
 https://kwetemasego-sego.github.io/change-detection/?area=24.38120,54.54020,24.39920,54.56000&before=2026-07-03&after=2026-10-01
 ```
 
-`area` is the box's south, west, north and east edges (latitude and longitude), and `before` and `after` are the dates. If a link's area or dates don't make sense (say the before date is later than the after date), the page says so and waits for you to choose.
+`area` is the box's south, west, north and east edges (latitude and longitude), and `before` and `after` are the dates. If you were on the **Terrain** or **Place details** tab, the link ends with `&tab=terrain` or `&tab=place` and opens on that tab. The terrain is worked out again for whoever opens it. If a link's area or dates don't make sense (say the before date is later than the after date), the page says so and waits for you to choose.
+
+### Terrain
+
+The **Terrain** tab uses the free Copernicus DEM (GLO-30), a map of heights every 30 m for the whole world, read straight from Microsoft Planetary Computer like the satellite bands. It shows:
+
+| Result | What it means |
+|---|---|
+| **Elevation** | How high the ground is above sea level: the lowest, highest and average height in the area |
+| **Slope** | How steep the ground is, from 0° (flat) to 90° (a wall): the average and the steepest |
+| **Aspect** | The compass direction a slope faces, looking downhill. The tool gives the direction most sloping ground faces, ignoring ground flatter than 2°, or says the area is too flat to face any one way |
+| **Low-lying** | Ground less than 5 m above sea level, which is most at risk from floods and high tides: the share of the area that is |
+| **Hillshade** | A grey picture of the ground lit by a low sun from the north-west, so hills and valleys stand out. **Show hillshade** puts it over the map, and **Hide hillshade** takes it off |
+| **Elevation profile** | A chart of how high the ground is along a line across the square, from west to east through the middle. The line is drawn dashed on the map while the Terrain tab is open |
+
+Slope and aspect come from comparing each 30 m square's height with its neighbours to the east, west, north and south. Terrain is worked out for areas up to 20 km × 20 km.
+
+![The Terrain tab on Jebel Hafeet near Al Ain: heights from 396 to 1,114 m, an average slope of 30°, the hillshade over the map and the elevation profile in the panel.](docs/terrain.jpg)
+
+*Jebel Hafeet near Al Ain: 396 to 1,114 m high, with an average slope of 30° and a steepest of 64°, and the hillshade on. On flat ground at Khalifa City south the same size of square is 1 to 19 m high, with an average slope of 1.8°, and 78% of it is low-lying.*
 
 Tips:
 
@@ -196,6 +218,7 @@ All the numbers above are settings at the top of [`main.js`](main.js), so they'r
 | Soil type | [ISRIC SoilGrids](https://soilgrids.org/) | No |
 | Land cover | [OpenStreetMap](https://www.openstreetmap.org/) via the [Overpass API](https://overpass-api.de/) | No |
 | Wildlife records | [GBIF](https://www.gbif.org/) | No |
+| Elevation (Terrain tab) | [Copernicus DEM GLO-30](https://planetarycomputer.microsoft.com/dataset/cop-dem-glo-30) via Microsoft Planetary Computer (with a free signed address for each file) | No |
 | Place search | [Nominatim](https://nominatim.org/), with © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors' data. Following its [usage policy](https://operations.osmfoundation.org/policies/nominatim/): it only searches when you press Search, never more than once a second, keeps answers instead of asking twice, and shows its credit | No |
 
 Libraries: [Leaflet](https://leafletjs.com/) for the map, [geotiff.js](https://geotiffjs.github.io/) for reading the image files, [proj4js](https://github.com/proj4js/proj4js) for converting map coordinates, and [jsPDF](https://github.com/parallax/jsPDF) for the PDF report.
@@ -211,11 +234,13 @@ Sentinel-2 images contain modified Copernicus Sentinel data. Licences and full c
 - **Tall towers can cause a little false blue** at their feet as shadows change with the seasons (about 0.5% in a dense neighbourhood in testing).
 - **Bright fill on ground that was wet before isn't counted.** Wet ground drying out also turns pale, and from space the two look the same, so wet ground is always left out.
 - **Changes to surfaces that were already dark can be missed**, for example new panels added to an old solar farm, because those are left out to stop dust and cleaning looking like change.
+- **Terrain heights are of the surface, not the bare ground.** The elevation model includes buildings and trees, so in towns the steepest slope is often the edge of a building. Heights are 30 m apart, so small features are smoothed out. "Low-lying" only uses the height above sea level: it doesn't know about sea walls or drains.
+- **Mountains can show false change.** On Jebel Hafeet, between July and late September, about 5 ha of bare mountainside was marked as bright new surface, because slopes are lit differently as the sun gets lower. Check mountain results with the slider.
 - **Seasons**: lawns, crops and trees greening or drying out show as plants gained or lost. The panel warns when the photos are from different seasons, and **Compare with a year earlier** shows how much is probably seasonal.
 - **Areas up to 10 km × 10 km** for change detection. Larger areas would download too much data into the browser.
 - **The cloud check only uses the 6 most promising photos** near each date. If they are all cloudy over your area, try other dates.
 - **The time series is an average over the whole area**, so a building site that covers a small part of it only moves the lines a little. Draw the area tightly around the place you're interested in.
-- **It depends on free public services.** If Planetary Computer, Open-Meteo, SoilGrids, Overpass, GBIF or Nominatim are busy or down, that part shows a message or "Not available" while the rest keeps working. Planetary Computer's tile service is meant for exploring data and limits how many requests it accepts.
+- **It depends on free public services.** If Planetary Computer (images and elevation), Open-Meteo, SoilGrids, Overpass, GBIF or Nominatim are busy or down, that part shows a message or "Not available" while the rest keeps working. Planetary Computer's tile service is meant for exploring data and limits how many requests it accepts.
 - **It's a quick visual guide, not a survey.** Always check the before and after photos with the slider before drawing conclusions.
 
 ## Responsible use
@@ -251,8 +276,8 @@ Then:
 
 | Command | What it checks | Time | Needs the internet? |
 |---|---|---|---|
-| `npm run test:quick` | The page loads, and the change rules give the right answers on made-up data: white fill is found, small bright patches and cleaned solar panels aren't, seasons are worked out, the summary adds up. Also shared links (made, read back, bad ones refused, opening one starts the search), **Copy link**, the examples, and the place search's rules (only on Search, at most once a second, answers kept, credit shown), using made-up place search answers | About 15 seconds | Only for the map libraries |
-| `npm test` | The quick tests, plus one real site (Khalifa City south) run like a user would: real Sentinel-2 images, the white plot found, the seasonal warning and the year-apart check, and the same site opened from a shared link | About 30 to 60 seconds | Yes |
+| `npm run test:quick` | The page loads, and the change rules give the right answers on made-up data: white fill is found, small bright patches and cleaned solar panels aren't, seasons are worked out, the summary adds up. The terrain numbers on made-up heights: flat ground, a known 5.7° slope, which way slopes face, the hillshade, missing heights. Also shared links (made, read back, bad ones refused, opening one starts the search, the tab kept), **Copy link**, the examples, **Click to analyse** (off and on, 1, 2 and 5 km squares, your own dates kept), the tabs, and the place search's rules (only on Search, at most once a second, answers kept, credit shown), using made-up place search answers | About 20 seconds | Only for the map libraries |
+| `npm test` | The quick tests, plus one real site (Khalifa City south) run like a user would: real Sentinel-2 images, the white plot found, the seasonal warning and the year-apart check, the same site opened from a shared link, and the PDF report. Also real terrain for flat Khalifa City south and hilly Jebel Hafeet | About 1 minute | Yes |
 | `npm run test:validation` | All eight sites from [VALIDATION.md](VALIDATION.md), each checked against what a good result looks like. The numbers are saved in `test-output/validation.json` | About 2 to 5 minutes | Yes |
 
 Each test prints ✔ when it passes and ✖ with the reason when it fails. Riyadh City is marked as a known miss ("TODO"): it is reported but doesn't make the run fail.
@@ -273,14 +298,14 @@ A **release** is a named snapshot of the project at a moment when it worked, lik
 
 | File | What it does |
 |---|---|
-| `index.html` | The page: map, control panel, slider and place details panel |
+| `index.html` | The page: map, control panel with the result tabs, and slider |
 | `style.css` | How everything looks |
-| `main.js` | All the code: map, choosing an area and dates, finding images, reading bands, change detection, time series and timelapse, downloads, swipe slider, place details |
+| `main.js` | All the code: map, choosing an area (including Click to analyse) and dates, place search, examples and links, finding images, reading bands, change detection, terrain, time series and timelapse, downloads, swipe slider, place details |
 | `CREDITS.md` | Data sources, libraries and licences |
 | `VALIDATION.md` | Test results on eight sites, before and after the latest rule changes |
 | `docs/validation/` | Before, after and result pictures for each test site |
-| `docs/screenshot.jpg` | The screenshot at the top of this README |
-| `tests/` | The browser tests: `unit.test.js` (quick, made-up data), `sharing.test.js` (links, place search and examples, with made-up place search answers), `smoke.test.js` (one real site), `validation.js` (all eight sites), `sites.js` (the sites and how to run one) and `helpers.js` (starts a web server and headless Chrome) |
+| `docs/screenshot.jpg`, `docs/terrain.jpg` | The screenshots in this README |
+| `tests/` | The browser tests: `unit.test.js` (quick, made-up data), `sharing.test.js` (links, place search and examples, with made-up place search answers), `terrain.test.js` (terrain numbers, Click to analyse and the tabs), `smoke.test.js` (one real site), `validation.js` (all eight sites), `sites.js` (the sites and how to run one) and `helpers.js` (starts a web server and headless Chrome) |
 | `package.json`, `package-lock.json` | The test tool (Puppeteer) and the test commands. The site itself doesn't need them |
 | `.github/workflows/` | Instructions for GitHub Actions: the tests on every push, and the weekly validation |
 
