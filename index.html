@@ -18,6 +18,15 @@
   <!-- The map will be drawn inside this empty box -->
   <div id="map"></div>
 
+  <!-- Information panel that floats on top of the map -->
+  <div id="info-panel">
+    <div><strong>Soldier:</strong> <span id="soldier-position">-</span></div>
+    <div><strong>Target:</strong> <span id="target-info">-</span></div>
+    <button id="locate-button" type="button">Locate me</button>
+    <div id="locate-status"></div>
+    <div class="hint">Move with the arrow keys, or click the map to walk there.</div>
+  </div>
+
   <!-- Leaflet's JavaScript (the mapping library itself) -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
