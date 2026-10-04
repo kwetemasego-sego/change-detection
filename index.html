@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Soldier Map Game</title>
+  <title>Satellite Change Viewer</title>
 
   <!-- Leaflet's stylesheet (makes the map, zoom buttons and popups look right) -->
   <link rel="stylesheet"
@@ -18,42 +18,61 @@
   <!-- The map will be drawn inside this empty box -->
   <div id="map"></div>
 
-  <!-- Information panel that floats on top of the map -->
+  <!-- The thin line that marks where the before/after swipe cuts the map -->
+  <div id="swipe-line" hidden></div>
+
+  <!-- Control panel that floats on top of the map -->
   <div id="info-panel">
-    <div class="mission">Mission: reach Rally Point Alpha 🎯 in Khalidiya Garden</div>
-    <div>
-      <strong>Health:</strong>
-      <span class="health-bar"><span id="health-fill"></span></span>
-      <span id="health-text">100</span>
+    <div class="panel-title">Satellite Change Viewer</div>
+    <div class="hint">Compare Sentinel-2 satellite images of an area on two dates.</div>
+
+    <div class="step">
+      <strong>1. Area</strong>
+      <div class="buttons">
+        <button id="draw-button" type="button">Draw area</button>
+        <button id="use-view-button" type="button">Use visible area</button>
+      </div>
+      <div id="area-text" class="small">No area chosen yet</div>
     </div>
-    <div><strong>Enemies left:</strong> <span id="enemies-left">3</span></div>
-    <div><strong>Movement:</strong> <span id="movement-text">Standing on land</span></div>
-    <div><strong>Soldier:</strong> <span id="soldier-position">-</span></div>
-    <div><strong>Target:</strong> <span id="target-info">-</span></div>
-    <div class="buttons">
-      <button id="map-view-button" type="button">Show street map</button>
-      <button id="follow-button" type="button">Camera follow: on</button>
-      <button id="locate-button" type="button">Locate me</button>
+
+    <div class="step">
+      <strong>2. Dates</strong>
+      <div class="dates">
+        <label>Before <input id="before-date" type="date"></label>
+        <label>After <input id="after-date" type="date"></label>
+      </div>
+      <div class="buttons">
+        <button id="find-button" type="button">Find images</button>
+      </div>
     </div>
-    <div id="locate-status"></div>
-    <div class="hint">
-      Arrow keys or click the map to walk. Hold Shift to run. Space to attack.<br>
-      Stay out of the red circles. Water slows you down.
+
+    <div class="step">
+      <div><strong>Before image:</strong> <span id="before-info">-</span></div>
+      <div><strong>After image:</strong> <span id="after-info">-</span></div>
+      <div id="status-text" class="status">Start by choosing an area.</div>
+    </div>
+
+    <div class="step">
+      <div class="small"><strong>Pointer:</strong> <span id="pointer-position">-</span></div>
+      <div class="buttons">
+        <button id="map-view-button" type="button">Show street map</button>
+        <button id="locate-button" type="button">Locate me</button>
+      </div>
+      <div id="locate-status"></div>
     </div>
   </div>
 
-  <!-- The end-of-mission message. "hidden" keeps it invisible until the game ends. -->
-  <div id="game-over" hidden>
-    <div class="game-over-box">
-      <h1 id="game-over-title">Mission complete</h1>
-      <p id="game-over-text"></p>
-      <button id="restart-button" type="button">Play again</button>
-    </div>
+  <!-- The before/after slider. "hidden" keeps it invisible until there are images to compare. -->
+  <div id="swipe-bar" hidden>
+    <span id="swipe-before-label">Before</span>
+    <input id="swipe-slider" type="range" min="0" max="100" value="50" aria-label="Swipe between before and after">
+    <span id="swipe-after-label">After</span>
   </div>
 
-  <!-- Details about the place where the soldier is standing -->
+  <!-- Details about the centre of the chosen area -->
   <div id="place-panel">
     <div class="panel-title">Place details <span id="place-coords"></span></div>
+    <div class="small">For the centre of the chosen area.</div>
     <dl>
       <dt>Elevation</dt>   <dd id="detail-elevation">-</dd>
       <dt>Weather now</dt> <dd id="detail-weather">-</dd>
@@ -63,8 +82,8 @@
       <dt>Wildlife</dt>    <dd id="detail-wildlife">-</dd>
     </dl>
     <div class="credits">
-      Data: Open-Meteo · ISRIC SoilGrids · © OpenStreetMap contributors · GBIF.
-      Soldier art: Kenney.nl (CC0). Full credits in CREDITS.md.
+      Data: Copernicus Sentinel-2 via Microsoft Planetary Computer · Open-Meteo · ISRIC SoilGrids ·
+      © OpenStreetMap contributors · GBIF. Full credits in CREDITS.md.
     </div>
   </div>
 
@@ -73,11 +92,7 @@
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
           crossorigin=""></script>
 
-  <!-- Map data from OpenStreetMap: enemy patrol routes and building outlines -->
-  <script src="patrol-routes.js"></script>
-  <script src="buildings.js"></script>
-
-  <!-- Our own code. It must come AFTER Leaflet and the routes, because it uses them. -->
+  <!-- Our own code. It must come AFTER Leaflet, because it uses Leaflet. -->
   <script src="main.js"></script>
 </body>
 </html>

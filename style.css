@@ -13,52 +13,73 @@ body {
   height: 100%;
 }
 
-/* The floating information panel in the top-right corner */
-#info-panel {
+/* Both floating panels share this look: white, rounded, with a soft shadow */
+#info-panel,
+#place-panel {
   position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 1000; /* keeps the panel above the map */
-  max-width: calc(100% - 80px); /* leaves room for the zoom buttons on small screens */
+  z-index: 1000; /* keeps the panels above the map */
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.94);
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-sizing: border-box;
+  overflow-y: auto; /* scroll inside the panel if the text is too long */
+}
+
+/* The control panel in the top-right corner */
+#info-panel {
+  top: 10px;
+  right: 10px;
+  width: 300px;
+  max-width: calc(100% - 70px); /* leaves room for the zoom buttons on small screens */
+  max-height: calc(100% - 20px);
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.5;
   font-variant-numeric: tabular-nums; /* stops numbers jiggling as they change */
 }
 
-.mission {
+/* The place details panel in the bottom-left corner */
+#place-panel {
+  bottom: 24px;
+  left: 10px;
+  width: 320px;
+  max-width: calc(100% - 20px);
+  max-height: 45vh;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.panel-title {
   font-weight: bold;
-  margin-bottom: 2px;
+  font-size: 15px;
 }
 
-/* The player's health bar: a grey track with a coloured fill inside */
-.health-bar {
-  display: inline-block;
-  width: 100px;
-  height: 10px;
-  background: #ddd;
-  border-radius: 5px;
-  overflow: hidden;
-  vertical-align: middle;
+/* Each numbered step in the control panel, separated by a thin line */
+.step {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #ddd;
 }
 
-#health-fill {
-  display: block;
-  width: 100%;
-  height: 100%;
-  background: #43a047; /* JavaScript changes this to orange or red as health drops */
+.small,
+.hint {
+  font-size: 12px;
+  color: #555;
 }
 
-/* The row of buttons in the panel. flex-wrap lets them wrap onto
+.status {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #1a5fb4;
+}
+
+/* The row of buttons. flex-wrap lets them wrap onto
    a second line on narrow screens such as phones. */
 .buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 6px;
+  margin: 6px 0 4px;
 }
 
 .buttons button {
@@ -67,47 +88,34 @@ body {
   cursor: pointer;
 }
 
-/* Hide the status line until there is something to say */
-#locate-status:empty {
-  display: none;
+/* The two date boxes, side by side (or stacked when there isn't room) */
+.dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
 }
 
-.hint {
-  margin-top: 4px;
+.dates label {
+  display: flex;
+  flex-direction: column;
   font-size: 12px;
   color: #555;
 }
 
-/* The place details panel in the bottom-left corner */
-#place-panel {
-  position: absolute;
-  bottom: 24px;
-  left: 10px;
-  z-index: 1000;
-  width: 320px;
-  max-width: calc(100% - 20px);
-  max-height: 55vh; /* never more than about half the screen height */
-  overflow-y: auto; /* scroll inside the panel if the text is too long */
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.92);
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+.dates input {
   font-size: 13px;
-  line-height: 1.45;
-  box-sizing: border-box;
 }
 
-.panel-title {
-  font-weight: bold;
-  font-size: 14px;
-  margin-bottom: 6px;
+/* Hide the location status line until there is something to say */
+#locate-status:empty {
+  display: none;
 }
 
 #place-coords {
   font-weight: normal;
   font-size: 12px;
   color: #555;
-  font-variant-numeric: tabular-nums;
 }
 
 /* <dl> is a "description list": a label (dt) followed by its value (dd) */
@@ -130,196 +138,55 @@ body {
   color: #666;
 }
 
-/* Markers drawn with an emoji instead of a picture */
-.emoji-icon {
-  font-size: 28px;
-  line-height: 32px;
-  text-align: center;
-  filter: drop-shadow(0 0 3px white); /* a soft white glow so markers stand out on the imagery */
-}
-
-/* =====================================================
-   Soldier sprites
-   =====================================================
-   --sprite-size is the soldier's size on screen. main.js changes it when
-   you zoom (see updateSpriteSize). Every size below is a fraction of it,
-   so the whole soldier grows and shrinks together. */
-:root {
-  --sprite-size: 36px;
-}
-
-/* A square box centred exactly on the soldier's position */
-.soldier {
+/* --- The before/after swipe slider, at the bottom middle of the screen --- */
+#swipe-bar {
   position: absolute;
-  left: calc(var(--sprite-size) / -2);
-  top: calc(var(--sprite-size) / -2);
-  width: var(--sprite-size);
-  height: var(--sprite-size);
-}
-
-/* The part that turns to face the direction of movement (main.js sets the rotation) */
-.soldier-sprite {
-  position: absolute;
-  inset: 0;
-}
-
-/* The body picture. The Kenney sprites face right (east) and the rifle sticks
-   out in front, so the picture is shifted until the soldier's head and shoulders
-   sit in the middle of the box. That way the soldier turns around its own centre. */
-.soldier-body {
-  position: absolute;
-  top: 0;
-  left: calc(var(--sprite-size) * 0.13);
-  height: 100%;
-  transform-origin: 31% 50%; /* the centre of the head and shoulders */
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7)); /* helps it stand out on the photos */
-}
-
-/* Two boots, hidden under the body while standing still */
-.foot {
-  position: absolute;
-  left: calc(50% - var(--sprite-size) * 0.13);
-  width: calc(var(--sprite-size) * 0.26);
-  height: calc(var(--sprite-size) * 0.16);
-  background: #6b4f33; /* brown boots... */
-  border: 1px solid #1f1a14; /* ...with a dark outline, so they show on dark roads */
-  border-radius: 40%;
-}
-
-.foot.left {
-  top: calc(50% - var(--sprite-size) * 0.25);
-}
-
-.foot.right {
-  top: calc(50% + var(--sprite-size) * 0.09);
-}
-
-/* --- Walking: boots step forwards and backwards, body sways gently --- */
-.walking .foot {
-  animation: walk-step 0.6s ease-in-out infinite;
-}
-
-.walking .foot.right {
-  animation-delay: -0.3s; /* half a step behind, so the feet take turns */
-}
-
-.walking .soldier-body {
-  animation: walk-sway 0.6s ease-in-out infinite;
-}
-
-/* Each boot swings from behind the body to in front of it, and back */
-@keyframes walk-step {
-  0%, 100% { transform: translateX(calc(var(--sprite-size) * -0.5)); }
-  50%      { transform: translateX(calc(var(--sprite-size) * 0.5)); }
-}
-
-@keyframes walk-sway {
-  0%, 100% { transform: rotate(-3deg); }
-  50%      { transform: rotate(3deg); }
-}
-
-/* --- Running: faster, longer steps and more sway --- */
-.running .foot {
-  animation: run-step 0.34s ease-in-out infinite;
-}
-
-.running .foot.right {
-  animation-delay: -0.17s;
-}
-
-.running .soldier-body {
-  animation: run-sway 0.34s ease-in-out infinite;
-}
-
-@keyframes run-step {
-  0%, 100% { transform: translateX(calc(var(--sprite-size) * -0.62)); }
-  50%      { transform: translateX(calc(var(--sprite-size) * 0.62)); }
-}
-
-@keyframes run-sway {
-  0%, 100% { transform: rotate(-5deg); }
-  50%      { transform: rotate(5deg); }
-}
-
-/* --- Attacking: a flash at the end of the rifle, and the body kicks back --- */
-.muzzle-flash {
-  display: none;
-  position: absolute;
-  left: calc(var(--sprite-size) * 1.22);
-  top: calc(var(--sprite-size) * 0.58);
-  width: calc(var(--sprite-size) * 0.4);
-  height: calc(var(--sprite-size) * 0.4);
-  border-radius: 50%;
-  background: radial-gradient(circle, #fff7c2 0%, #ffd54f 35%, rgba(255, 152, 0, 0.7) 60%, transparent 72%);
-}
-
-.soldier.attacking .muzzle-flash {
-  display: block;
-}
-
-.soldier.attacking .soldier-body {
-  animation: recoil 0.15s ease-out;
-}
-
-@keyframes recoil {
-  0%   { transform: translateX(calc(var(--sprite-size) * -0.1)); }
-  100% { transform: translateX(0); }
-}
-
-/* While an enemy is hurting the player, the soldier glows red */
-.soldier-marker.hurt .soldier-body {
-  filter: drop-shadow(0 0 2px #ff1744) drop-shadow(0 0 4px #ff1744);
-}
-
-/* The enemy's health bar floats above its head (it doesn't turn with the soldier) */
-.enemy-health {
-  position: absolute;
-  left: 15%;
-  top: calc(var(--sprite-size) * -0.2);
-  width: 70%;
-  height: 4px;
-  background: rgba(0, 0, 0, 0.5);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.enemy-health-fill {
-  width: 100%;
-  height: 100%;
-  background: #e53935;
-}
-
-/* The end-of-mission message covers the whole screen with a dark layer */
-#game-over {
-  position: fixed;
-  inset: 0; /* stretch to all four edges of the window */
-  z-index: 2000; /* above the map and the panels */
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%); /* centres the bar */
+  z-index: 1000;
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
+  gap: 10px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.94);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  font-size: 13px;
+  white-space: nowrap;
 }
 
-/* Without this, "display: flex" above would beat the "hidden" attribute */
-#game-over[hidden] {
-  display: none;
+#swipe-slider {
+  width: 220px;
+  cursor: ew-resize;
 }
 
-.game-over-box {
-  max-width: calc(100% - 40px);
-  box-sizing: border-box;
-  padding: 24px 32px;
+/* The white line on the map where "before" meets "after" */
+#swipe-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  margin-left: -1px; /* centre the 3 px line on the cut */
+  z-index: 900; /* above the map, below the panels */
   background: white;
-  border-radius: 12px;
-  text-align: center;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.6);
+  pointer-events: none; /* clicks go through it to the map */
 }
 
-.game-over-box h1 {
-  margin: 0 0 8px;
-}
+/* On narrow screens (phones), keep the slider above the place details panel */
+@media (max-width: 760px) {
+  #place-panel {
+    max-height: 30vh;
+  }
 
-#restart-button {
-  padding: 8px 20px;
-  font-size: 16px;
-  cursor: pointer;
+  #swipe-bar {
+    bottom: calc(30vh + 34px);
+    max-width: calc(100% - 20px);
+    box-sizing: border-box;
+  }
+
+  #swipe-slider {
+    width: 120px;
+  }
 }
