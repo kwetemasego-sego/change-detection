@@ -138,44 +138,146 @@ body {
   filter: drop-shadow(0 0 3px white); /* a soft white glow so markers stand out on the imagery */
 }
 
-/* The player's soldier: a helmet on a green badge */
-.player-icon {
-  font-size: 18px;
-  line-height: 26px;
-  text-align: center;
-  background: #43a047;
-  border: 2px solid white;
-  border-radius: 50%; /* turns the square into a circle */
-  box-sizing: border-box;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+/* =====================================================
+   Soldier sprites
+   =====================================================
+   --sprite-size is the soldier's size on screen. main.js changes it when
+   you zoom (see updateSpriteSize). Every size below is a fraction of it,
+   so the whole soldier grows and shrinks together. */
+:root {
+  --sprite-size: 36px;
 }
 
-/* While an enemy is hurting the player, a red ring appears around the badge */
-.player-icon.hurt {
-  box-shadow: 0 0 0 4px #e53935;
+/* A square box centred exactly on the soldier's position */
+.soldier {
+  position: absolute;
+  left: calc(var(--sprite-size) / -2);
+  top: calc(var(--sprite-size) / -2);
+  width: var(--sprite-size);
+  height: var(--sprite-size);
 }
 
-/* Enemies: a helmet on a red badge, with a health bar below */
-.enemy-icon {
-  text-align: center;
+/* The part that turns to face the direction of movement (main.js sets the rotation) */
+.soldier-sprite {
+  position: absolute;
+  inset: 0;
 }
 
-.enemy-emoji {
-  width: 28px;
-  height: 28px;
-  margin: 0 auto;
-  font-size: 18px;
-  line-height: 28px;
-  background: #e53935;
-  border: 2px solid white;
-  border-radius: 50%; /* turns the square into a circle */
-  box-sizing: border-box;
+/* The body picture. The Kenney sprites face right (east) and the rifle sticks
+   out in front, so the picture is shifted until the soldier's head and shoulders
+   sit in the middle of the box. That way the soldier turns around its own centre. */
+.soldier-body {
+  position: absolute;
+  top: 0;
+  left: calc(var(--sprite-size) * 0.13);
+  height: 100%;
+  transform-origin: 31% 50%; /* the centre of the head and shoulders */
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7)); /* helps it stand out on the photos */
 }
 
+/* Two boots, hidden under the body while standing still */
+.foot {
+  position: absolute;
+  left: calc(50% - var(--sprite-size) * 0.13);
+  width: calc(var(--sprite-size) * 0.26);
+  height: calc(var(--sprite-size) * 0.16);
+  background: #6b4f33; /* brown boots... */
+  border: 1px solid #1f1a14; /* ...with a dark outline, so they show on dark roads */
+  border-radius: 40%;
+}
+
+.foot.left {
+  top: calc(50% - var(--sprite-size) * 0.25);
+}
+
+.foot.right {
+  top: calc(50% + var(--sprite-size) * 0.09);
+}
+
+/* --- Walking: boots step forwards and backwards, body sways gently --- */
+.walking .foot {
+  animation: walk-step 0.6s ease-in-out infinite;
+}
+
+.walking .foot.right {
+  animation-delay: -0.3s; /* half a step behind, so the feet take turns */
+}
+
+.walking .soldier-body {
+  animation: walk-sway 0.6s ease-in-out infinite;
+}
+
+/* Each boot swings from behind the body to in front of it, and back */
+@keyframes walk-step {
+  0%, 100% { transform: translateX(calc(var(--sprite-size) * -0.5)); }
+  50%      { transform: translateX(calc(var(--sprite-size) * 0.5)); }
+}
+
+@keyframes walk-sway {
+  0%, 100% { transform: rotate(-3deg); }
+  50%      { transform: rotate(3deg); }
+}
+
+/* --- Running: faster, longer steps and more sway --- */
+.running .foot {
+  animation: run-step 0.34s ease-in-out infinite;
+}
+
+.running .foot.right {
+  animation-delay: -0.17s;
+}
+
+.running .soldier-body {
+  animation: run-sway 0.34s ease-in-out infinite;
+}
+
+@keyframes run-step {
+  0%, 100% { transform: translateX(calc(var(--sprite-size) * -0.62)); }
+  50%      { transform: translateX(calc(var(--sprite-size) * 0.62)); }
+}
+
+@keyframes run-sway {
+  0%, 100% { transform: rotate(-5deg); }
+  50%      { transform: rotate(5deg); }
+}
+
+/* --- Attacking: a flash at the end of the rifle, and the body kicks back --- */
+.muzzle-flash {
+  display: none;
+  position: absolute;
+  left: calc(var(--sprite-size) * 1.22);
+  top: calc(var(--sprite-size) * 0.58);
+  width: calc(var(--sprite-size) * 0.4);
+  height: calc(var(--sprite-size) * 0.4);
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff7c2 0%, #ffd54f 35%, rgba(255, 152, 0, 0.7) 60%, transparent 72%);
+}
+
+.soldier.attacking .muzzle-flash {
+  display: block;
+}
+
+.soldier.attacking .soldier-body {
+  animation: recoil 0.15s ease-out;
+}
+
+@keyframes recoil {
+  0%   { transform: translateX(calc(var(--sprite-size) * -0.1)); }
+  100% { transform: translateX(0); }
+}
+
+/* While an enemy is hurting the player, the soldier glows red */
+.soldier-marker.hurt .soldier-body {
+  filter: drop-shadow(0 0 2px #ff1744) drop-shadow(0 0 4px #ff1744);
+}
+
+/* The enemy's health bar floats above its head (it doesn't turn with the soldier) */
 .enemy-health {
-  width: 28px;
+  position: absolute;
+  left: 15%;
+  top: calc(var(--sprite-size) * -0.2);
+  width: 70%;
   height: 4px;
-  margin: 2px auto 0;
   background: rgba(0, 0, 0, 0.5);
   border-radius: 2px;
   overflow: hidden;

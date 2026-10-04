@@ -63,7 +63,8 @@
       <dt>Wildlife</dt>    <dd id="detail-wildlife">-</dd>
     </dl>
     <div class="credits">
-      Data: Open-Meteo · ISRIC SoilGrids · © OpenStreetMap contributors · GBIF
+      Data: Open-Meteo · ISRIC SoilGrids · © OpenStreetMap contributors · GBIF.
+      Soldier art: Kenney.nl (CC0). Full credits in CREDITS.md.
     </div>
   </div>
 
@@ -72,7 +73,10 @@
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
           crossorigin=""></script>
 
-  <!-- Our own code. It must come AFTER Leaflet, because it uses Leaflet. -->
+  <!-- The enemies' patrol routes (real streets from OpenStreetMap) -->
+  <script src="patrol-routes.js"></script>
+
+  <!-- Our own code. It must come AFTER Leaflet and the routes, because it uses them. -->
   <script src="main.js"></script>
 </body>
 </html>

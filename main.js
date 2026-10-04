@@ -28,20 +28,17 @@ const ATTACK_RANGE = 20; // metres
 const ATTACK_DAMAGE = 34; // so an enemy takes 3 hits
 const ATTACK_COOLDOWN_MS = 400; // the soldier can attack at most every 0.4 seconds
 
-// Enemies. Each one walks back and forth between two points ("from" and "to").
-// startAt says where it begins: 0 = at "from", 1 = at "to", 0.5 = halfway.
-const ENEMY_PATROLS = [
-  // On Zayed The First Street, which crosses the route
-  { from: [24.46865, 54.34204], to: [24.46933, 54.34288], startAt: 0.5 },
-  // In the block between Zayed The First Street and the garden
-  { from: [24.46935, 54.3436], to: [24.46865, 54.34428], startAt: 0 },
-  // Inside the garden, crossing the path about 50 m west of the rally point
-  { from: [24.46935, 54.34492], to: [24.46835, 54.345], startAt: 1 }
-];
+// Enemies. Each one patrols back and forth along a real street or path.
+// The routes come from OpenStreetMap and live in patrol-routes.js.
 const ENEMY_SPEED = 1.2; // metres per second (a slow patrol walk)
 const ENEMY_MAX_HEALTH = 100;
 const ENEMY_DANGER_RANGE = 25; // metres: closer than this and the player gets hurt
 const ENEMY_DAMAGE_PER_SECOND = 8; // health lost per second, for each enemy in range
+const ENEMY_SHOT_INTERVAL_MS = 500; // how often an enemy plays its firing animation
+
+// Soldier pictures (from Kenney.nl, see CREDITS.md)
+const PLAYER_IMAGE = "assets/sprites/player.png";
+const ENEMY_IMAGE = "assets/sprites/enemy.png";
 
 // How long the soldier must stand still before we look up place details.
 // 1000 milliseconds = 1 second.
@@ -143,21 +140,75 @@ function emojiIcon(emoji) {
   });
 }
 
-// The player's soldier: a helmet on a green badge, so it stands out on busy streets
-const playerIcon = L.divIcon({
-  html: "🪖",
-  className: "player-icon",
-  iconSize: [30, 30],
-  iconAnchor: [15, 15]
-});
+// --- Soldier sprites ---
+// Each soldier is built from a few pieces of HTML, drawn by style.css:
+//   two boots (they step back and forth when walking or running),
+//   the body picture, and a muzzle flash (only visible when attacking).
+// The whole sprite is rotated to face the way the soldier is going.
+// "extraHtml" lets enemies add a health bar above their heads.
+function soldierIcon(imageFile, extraHtml) {
+  return L.divIcon({
+    className: "soldier-marker",
+    iconSize: [0, 0], // the sprite centres itself on the spot using CSS
+    html:
+      '<div class="soldier">' +
+      '<div class="soldier-sprite">' +
+      '<div class="foot left"></div><div class="foot right"></div>' +
+      '<img class="soldier-body" src="' + imageFile + '" alt="">' +
+      '<div class="muzzle-flash"></div>' +
+      "</div>" +
+      (extraHtml || "") +
+      "</div>"
+  });
+}
 
+// Updates how a soldier looks:
+//   action: "standing", "walking" or "running" (each has its own animation in style.css)
+//   facing: the direction in degrees: 0 = east, 90 = south, 180 = west, -90 = north
+function showSoldier(marker, action, facing) {
+  const soldierDiv = marker.getElement().querySelector(".soldier");
+  soldierDiv.classList.toggle("walking", action === "walking");
+  soldierDiv.classList.toggle("running", action === "running");
+  soldierDiv.querySelector(".soldier-sprite").style.transform = "rotate(" + facing + "deg)";
+}
+
+// Plays the attack animation (muzzle flash and recoil) for a moment
+function playAttack(marker) {
+  const soldierDiv = marker.getElement().querySelector(".soldier");
+  soldierDiv.classList.add("attacking");
+  setTimeout(function () {
+    soldierDiv.classList.remove("attacking");
+  }, 150);
+}
+
+// Turns a direction (metres north and east) into degrees for showSoldier.
+// On a screen, "down" is positive, so north has to be flipped.
+function facingDegrees(north, east) {
+  return (Math.atan2(-north, east) * 180) / Math.PI;
+}
+
+// --- Sprite size ---
+// Real soldiers would be tiny dots when zoomed out, and a fixed size would
+// look silly when zoomed in. So the sprites grow a little with each zoom level,
+// between a smallest and a largest size (in screen pixels).
+function updateSpriteSize() {
+  const size = Math.max(22, Math.min(48, 36 + (map.getZoom() - 18) * 12));
+  // style.css reads this "--sprite-size" value to size every soldier
+  document.documentElement.style.setProperty("--sprite-size", size + "px");
+}
+map.on("zoomend", updateSpriteSize);
+updateSpriteSize();
+
+// --- The player's soldier ---
 // interactive: false means clicks go "through" the marker to the map,
 // so you can click anywhere (even on a marker) to walk there.
 const soldier = L.marker([START_LAT, START_LNG], {
-  icon: playerIcon,
+  icon: soldierIcon(PLAYER_IMAGE),
   interactive: false,
   zIndexOffset: 1000 // draw the soldier on top of other markers
 }).addTo(map);
+
+let playerFacing = 0; // which way the player faces, in degrees (starts facing east)
 
 const target = L.marker([TARGET_LAT, TARGET_LNG], { icon: emojiIcon("🎯"), interactive: false })
   .addTo(map)
@@ -340,11 +391,17 @@ function movePlayer(seconds) {
     north = gap.north;
     east = gap.east;
   } else {
-    showMovement("Standing", 0); // nothing to do: the soldier is standing still
+    // Nothing to do: the soldier stands still, still facing the same way
+    showMovement("Standing", 0);
+    showSoldier(soldier, "standing", playerFacing);
     return;
   }
 
-  showMovement(keysDown.Shift ? "Running" : "Walking", currentSpeed());
+  // Face the way we're moving, and pick the walking or running animation
+  playerFacing = facingDegrees(north, east);
+  const running = keysDown.Shift === true;
+  showMovement(running ? "Running" : "Walking", currentSpeed());
+  showSoldier(soldier, running ? "running" : "walking", playerFacing);
 
   const distanceLeft = Math.hypot(north, east); // length of the direction arrow
   const stepLength = currentSpeed() * seconds; // metres to move this frame
@@ -422,32 +479,61 @@ function checkWater() {
 // 6. Enemies
 // =====================================================
 
-// Enemy markers are a red-tinted helmet with a small health bar underneath
-const enemyIcon = L.divIcon({
-  html:
-    '<div class="enemy-emoji">🪖</div>' +
-    '<div class="enemy-health"><div class="enemy-health-fill"></div></div>',
-  className: "enemy-icon",
-  iconSize: [32, 38],
-  iconAnchor: [16, 16]
-});
+// --- Patrol routes ---
+// A route is a list of points along a real street (from patrol-routes.js).
+// We also work out how far along the route each point is, which makes it
+// easy to find the spot that is, say, 37 metres from the start.
+function makeRoute(points) {
+  const latLngs = points.map(function (point) {
+    return L.latLng(point);
+  });
+  const distances = [0]; // distances[i] = metres from the start to point i
+  for (let i = 1; i < latLngs.length; i++) {
+    distances.push(distances[i - 1] + map.distance(latLngs[i - 1], latLngs[i]));
+  }
+  return { points: latLngs, distances: distances, length: distances[distances.length - 1] };
+}
 
-// Build one enemy object for each patrol in the settings
+// Finds the spot a number of metres along a route.
+// Also returns the two route points either side, so we know which way the street goes.
+function pointOnRoute(route, metresAlong) {
+  // Find the piece of street (between point i-1 and point i) that contains this distance
+  let i = 1;
+  while (i < route.points.length - 1 && route.distances[i] < metresAlong) {
+    i = i + 1;
+  }
+  const before = route.points[i - 1];
+  const after = route.points[i];
+  const pieceLength = route.distances[i] - route.distances[i - 1];
+  const t = pieceLength > 0 ? (metresAlong - route.distances[i - 1]) / pieceLength : 0;
+
+  return {
+    position: L.latLng(before.lat + (after.lat - before.lat) * t, before.lng + (after.lng - before.lng) * t),
+    before: before,
+    after: after
+  };
+}
+
+// --- Create the enemies ---
+const enemyHealthBar = '<div class="enemy-health"><div class="enemy-health-fill"></div></div>';
+
 const enemies = [];
-for (const patrol of ENEMY_PATROLS) {
-  const from = L.latLng(patrol.from);
-  const to = L.latLng(patrol.to);
+for (const patrol of PATROL_ROUTES) {
+  const route = makeRoute(patrol.points);
   const enemy = {
-    from: from,
-    to: to,
-    patrolLength: map.distance(from, to), // in metres
-    progress: patrol.startAt, // 0 = at "from", 1 = at "to"
-    direction: 1, // 1 = walking towards "to", -1 = walking back towards "from"
+    route: route,
+    metresAlong: patrol.startAt * route.length, // how far along the route the enemy is
+    direction: 1, // 1 = walking forwards along the route, -1 = walking back
+    facing: 0,
+    lastShotTime: 0,
     health: ENEMY_MAX_HEALTH,
     alive: true
   };
-  const position = enemyPosition(enemy);
-  enemy.marker = L.marker(position, { icon: enemyIcon, interactive: false }).addTo(map);
+  const position = pointOnRoute(route, enemy.metresAlong).position;
+  enemy.marker = L.marker(position, {
+    icon: soldierIcon(ENEMY_IMAGE, enemyHealthBar),
+    interactive: false
+  }).addTo(map);
 
   // A faint red circle shows how close is too close
   enemy.dangerZone = L.circle(position, {
@@ -461,37 +547,51 @@ for (const patrol of ENEMY_PATROLS) {
   enemies.push(enemy);
 }
 
-// Where along its patrol line an enemy is (progress 0 = at "from", 1 = at "to")
-function enemyPosition(enemy) {
-  return L.latLng(
-    enemy.from.lat + (enemy.to.lat - enemy.from.lat) * enemy.progress,
-    enemy.from.lng + (enemy.to.lng - enemy.from.lng) * enemy.progress
-  );
-}
-
 function enemiesAlive() {
   return enemies.filter(function (enemy) {
     return enemy.alive;
   });
 }
 
-// Called every frame: each enemy takes a small step along its patrol,
-// turning around when it reaches either end.
+// Called every frame. If the player is close, an enemy stops, turns to face
+// them and fires. Otherwise it takes a small step along its street,
+// turning around when it reaches either end of its route.
 function moveEnemies(seconds) {
-  for (const enemy of enemiesAlive()) {
-    enemy.progress = enemy.progress + (enemy.direction * ENEMY_SPEED * seconds) / enemy.patrolLength;
+  const now = performance.now();
 
-    if (enemy.progress >= 1) {
-      enemy.progress = 1;
-      enemy.direction = -1; // reached "to": turn around
-    } else if (enemy.progress <= 0) {
-      enemy.progress = 0;
-      enemy.direction = 1; // reached "from": turn around
+  for (const enemy of enemiesAlive()) {
+    const enemyPos = enemy.marker.getLatLng();
+
+    if (map.distance(enemyPos, soldier.getLatLng()) < ENEMY_DANGER_RANGE) {
+      // Player spotted: stand still, aim at the player and fire every so often
+      const gap = metresApart(enemyPos, soldier.getLatLng());
+      enemy.facing = facingDegrees(gap.north, gap.east);
+      showSoldier(enemy.marker, "standing", enemy.facing);
+      if (now - enemy.lastShotTime > ENEMY_SHOT_INTERVAL_MS) {
+        playAttack(enemy.marker);
+        enemy.lastShotTime = now;
+      }
+      continue; // go on to the next enemy
     }
 
-    const position = enemyPosition(enemy);
-    enemy.marker.setLatLng(position);
-    enemy.dangerZone.setLatLng(position);
+    // Patrol: step along the route
+    enemy.metresAlong = enemy.metresAlong + enemy.direction * ENEMY_SPEED * seconds;
+    if (enemy.metresAlong >= enemy.route.length) {
+      enemy.metresAlong = enemy.route.length;
+      enemy.direction = -1; // reached the end of the route: turn around
+    } else if (enemy.metresAlong <= 0) {
+      enemy.metresAlong = 0;
+      enemy.direction = 1; // reached the start of the route: turn around
+    }
+
+    // Face along the street, in the direction of travel
+    const spot = pointOnRoute(enemy.route, enemy.metresAlong);
+    const street = metresApart(spot.before, spot.after);
+    enemy.facing = facingDegrees(street.north * enemy.direction, street.east * enemy.direction);
+
+    enemy.marker.setLatLng(spot.position);
+    enemy.dangerZone.setLatLng(spot.position);
+    showSoldier(enemy.marker, "walking", enemy.facing);
   }
 }
 
@@ -527,6 +627,23 @@ function attack() {
   if (now - lastAttackTime < ATTACK_COOLDOWN_MS) return;
   lastAttackTime = now;
 
+  // Turn to face the closest enemy within reach (if there is one)
+  let closestEnemy = null;
+  let closestDistance = ATTACK_RANGE;
+  for (const enemy of enemiesAlive()) {
+    const distance = map.distance(soldier.getLatLng(), enemy.marker.getLatLng());
+    if (distance <= closestDistance) {
+      closestEnemy = enemy;
+      closestDistance = distance;
+    }
+  }
+  if (closestEnemy) {
+    const gap = metresApart(soldier.getLatLng(), closestEnemy.marker.getLatLng());
+    playerFacing = facingDegrees(gap.north, gap.east);
+    showSoldier(soldier, "standing", playerFacing);
+  }
+
+  playAttack(soldier);
   showAttackFlash();
 
   for (const enemy of enemiesAlive()) {
