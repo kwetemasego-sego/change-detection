@@ -69,9 +69,19 @@
         <li><span class="swatch burned"></span><span>Burned</span><b id="size-burned"></b><span id="pct-burned" class="pct"></span></li>
       </ul>
       <div id="change-total"></div>
+      <div id="bright-note" class="small" hidden></div>
       <div class="small">
         <span class="swatch skipped"></span>Skipped because of cloud, shadow or missing data:
         <span id="pct-skipped"></span>
+      </div>
+      <!-- Shown when the two images are from different seasons -->
+      <div id="season-note" class="season-note" hidden>
+        <div id="season-text"></div>
+        <div class="buttons">
+          <button id="year-check-button" type="button">Compare with a year earlier</button>
+          <button id="year-check-toggle" type="button" hidden>Show year-apart changes</button>
+        </div>
+        <div id="year-check-text" class="small"></div>
       </div>
       <div class="small">
         A hectare (ha) is 10,000 m²: a square 100 m long on each side, a bit bigger than a football pitch.
@@ -92,6 +102,19 @@
           score moved by <b>0.15</b> or more, or its built-up score rose by <b>0.10</b>
           or more. Smaller shifts usually come from haze, the sun's angle or the
           season, not from real changes on the ground.
+        </p>
+        <p>
+          Bright new surfaces, like white fill on a building plot, can make the built-up
+          score go <i>down</i>. So a square also counts as new buildings or bare ground if
+          it became at least <b>30%</b> brighter in visible light than the area as a whole
+          did, ends up brighter than the area's usual ground, and is part of a patch of at
+          least <b>2,500 m²</b>. Ground beside water or plants is left out, because drying
+          out makes it brighter too.
+        </p>
+        <p>
+          Surfaces that were already dark, like solar panels, dark roofs and asphalt,
+          aren't counted as new buildings if they only got darker. Dust, cleaning and
+          shadows do that without anything new being built.
         </p>
         <p>
           A square counts as <b>burned</b> if its burn ratio (NBR) fell by <b>0.27</b> or

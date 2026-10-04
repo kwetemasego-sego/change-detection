@@ -39,6 +39,16 @@ const SHADOW_DARKENING = 0.6; // ground that became this much darker (less than 
 // Burned ground (see NBR in section 4b):
 const BURN_THRESHOLD = 0.27; // the burn ratio (NBR) must fall by at least 0.27, a "moderate" burn on the usual scale
 const BURN_FUEL_NDVI = 0.15; // ...and there must have been some plants to burn (NDVI 0.15+ before)
+// Bright new surfaces (white fill, sand, concrete) that the built-up score misses.
+// "Typical" means the middle value over the area's clear land, which takes out haze and the sun's angle.
+const BRIGHTENING = 1.3; // visible light must rise at least 30% more than it typically did across the area
+const BRIGHT_AFTER = 1.15; // ...and end up at least 15% brighter than the area's typical ground
+const BRIGHT_MIN_SQUARES = 25; // ...over a patch of at least 25 squares (2,500 m²): fill covers plots, not single roofs
+const NEAR_WATER_SQUARES = 3; // ignore brightening within 30 m of water (tides wet and dry the sand)...
+const NEAR_PLANTS_SQUARES = 2; // ...and within 20 m of plants (watering wets the ground beside them)
+// Surfaces that were already dark, like solar panels, dark roofs and asphalt, change
+// with dust, cleaning and light. They aren't counted as new buildings if they only got darker:
+const ALREADY_DARK = 0.8; // "already dark" = less than 80% as bright as the area's typical ground before
 const CHANGE_PIXEL_METRES = 10; // size of each compared square (Sentinel-2's sharpest bands are 10 m)
 const MAX_CHANGE_AREA_KM = 10; // larger areas would download too much, so changes aren't calculated
 const SQUARE_AREA_M2 = CHANGE_PIXEL_METRES * CHANGE_PIXEL_METRES; // each compared square counts as 100 m²
@@ -263,8 +273,9 @@ async function getToken() {
 }
 
 // Finds the photos near a date that cover the whole area, and checks the
-// clouds over the area for the most promising few
-async function findClearImages(area, dateText, token) {
+// clouds over the area for the most promising few. If "sameViewAs" (a photo) is
+// given, only photos from its satellite path and tile are used, if there are any.
+async function findClearImages(area, dateText, token, sameViewAs) {
   const date = new Date(dateText + "T12:00:00Z");
   const from = new Date(date.getTime() - SEARCH_WINDOW_DAYS * ONE_DAY);
   const to = new Date(Math.min(date.getTime() + SEARCH_WINDOW_DAYS * ONE_DAY, Date.now()));
@@ -279,9 +290,15 @@ async function findClearImages(area, dateText, token) {
   const data = await fetchJson(url);
 
   // Keep only photos that cover the WHOLE area (some only cover part of it)
-  const covering = data.features.filter(function (item) {
+  let covering = data.features.filter(function (item) {
     return coversArea(item.geometry, area);
   });
+  if (sameViewAs) {
+    const sameView = covering.filter(function (item) {
+      return sameViewItems(item, sameViewAs);
+    });
+    if (sameView.length > 0) covering = sameView;
+  }
   if (covering.length === 0) return [];
 
   // First, a quick sort using the cloud cover of the whole photo,
@@ -326,8 +343,7 @@ async function findClearImages(area, dateText, token) {
 // changed when it isn't, so a mismatched pair gets a big penalty.
 function choosePair(beforeList, afterList) {
   function sameView(a, b) {
-    return a.item.properties["sat:relative_orbit"] === b.item.properties["sat:relative_orbit"] &&
-           a.item.properties["s2:mgrs_tile"] === b.item.properties["s2:mgrs_tile"];
+    return sameViewItems(a.item, b.item);
   }
   let best = null;
   for (const before of beforeList) {
@@ -339,6 +355,12 @@ function choosePair(beforeList, afterList) {
     }
   }
   return best; // null if either list is empty
+}
+
+// Were two photos taken from the same satellite path, and stored in the same tile?
+function sameViewItems(a, b) {
+  return a.properties["sat:relative_orbit"] === b.properties["sat:relative_orbit"] &&
+         a.properties["s2:mgrs_tile"] === b.properties["s2:mgrs_tile"];
 }
 
 // What percentage of the area is hidden by cloud, cloud shadow or missing data?
@@ -392,11 +414,12 @@ function insideOutline(point, outline) {
 // 4a. Reading image bands with geotiff.js
 // =====================================================
 // A Sentinel-2 photo is stored as several files, one per "band" (colour of
-// light). We use five of them:
-//   B04 = red light (10 m pixels)
+// light). We use these:
+//   B02, B03, B04 = blue, green and red light (10 m pixels)
 //   B08 = near-infrared, invisible light that plants reflect strongly (10 m pixels)
 //   B8A = near-infrared again, in a narrower range and with 20 m pixels
 //   B11 = short-wave infrared, reflected strongly by bare ground and buildings (20 m pixels)
+//   B12 = longer short-wave infrared, for the burn ratio (20 m pixels)
 //   SCL = the scene classification described above (20 m pixels)
 // The files are "Cloud-Optimized GeoTIFFs": geotiff.js can download just the
 // small block of pixels we need, instead of the whole 200 MB file.
@@ -539,6 +562,7 @@ const PLANTS_LOST = 2;
 const NEW_BUILT_OR_BARE = 3;
 const SKIPPED = 4;
 const BURNED = 5;
+const BRIGHT_SURFACE = 6; // only used inside compareScores, then shown as NEW_BUILT_OR_BARE
 const CHANGE_COLOURS = {
   [PLANTS_GAINED]: [46, 204, 64, 220], // green
   [PLANTS_LOST]: [255, 65, 54, 220], // red
@@ -563,7 +587,7 @@ function storedOffset(item) {
   return Number(item.properties["s2:processing_baseline"]) >= 4 ? 1000 : 0;
 }
 
-// Reads the six bands of one photo and works out NDVI, NDBI, NBR and which squares to skip
+// Reads the bands of one photo and works out NDVI, NDBI, NBR, brightness and which squares to skip
 async function readScores(item, grid, token) {
   const projected = projectGrid(grid, item);
   const bands = await Promise.all(
@@ -574,11 +598,13 @@ async function readScores(item, grid, token) {
   return scoresFromBands(item, bands);
 }
 
-// The bands readScores needs, in this order
-const SCORE_BANDS = ["B04", "B08", "B8A", "B11", "SCL", "B12"];
+// The bands readScores needs, in this order. B02 (blue) and B03 (green) are
+// only used for visible brightness, which the time series doesn't need.
+const SCORE_BANDS = ["B04", "B08", "B8A", "B11", "SCL", "B12", "B02", "B03"];
+const SERIES_BANDS = SCORE_BANDS.slice(0, 6);
 
-// Works out the scores from the six bands' values (one value per grid square each)
-function scoresFromBands(item, [red, nir, nir20, swir, scl, swir2]) {
+// Works out the scores from the bands' values (one value per grid square each)
+function scoresFromBands(item, [red, nir, nir20, swir, scl, swir2, blue, green]) {
   const offset = storedOffset(item);
   function reflectance(value) {
     return Math.max(0, (value - offset) / 10000);
@@ -595,6 +621,7 @@ function scoresFromBands(item, [red, nir, nir20, swir, scl, swir2]) {
   const swirBrightness = new Float32Array(count); // short-wave infrared reflectance, 0 to 1
   const swir2Brightness = new Float32Array(count); // the same for the longer short-wave infrared (B12)
   const nirBrightness = new Float32Array(count); // near-infrared reflectance (B8A), 0 to 1
+  const visible = new Float32Array(count); // visible brightness: the average of blue, green and red, 0 to 1
   const usable = new Uint8Array(count); // 1 = clear view of the ground, 0 = skip
   const water = new Uint8Array(count); // 1 = SCL says water
 
@@ -613,10 +640,11 @@ function scoresFromBands(item, [red, nir, nir20, swir, scl, swir2]) {
     swirBrightness[i] = s;
     swir2Brightness[i] = s2;
     nirBrightness[i] = n20;
+    if (blue) visible[i] = (reflectance(blue[i]) + reflectance(green[i]) + r) / 3;
   }
   return {
     ndvi: ndvi, ndbi: ndbi, nbr: nbr, swir: swirBrightness, swir2: swir2Brightness, nir: nirBrightness,
-    usable: usable, water: water
+    visible: visible, usable: usable, water: water
   };
 }
 
@@ -624,6 +652,24 @@ function scoresFromBands(item, [red, nir, nir20, swir, scl, swir2]) {
 // each square, plus how many squares there are of each kind.
 function compareScores(before, after, grid) {
   let kinds = new Uint8Array(before.ndvi.length);
+
+  // The area's typical (middle) values over clear land. Haze and the sun's angle
+  // brighten or darken the whole area, so each square is compared with these.
+  const land = [];
+  for (let i = 0; i < kinds.length; i++) {
+    if (before.usable[i] && after.usable[i] && !before.water[i] && !after.water[i]) land.push(i);
+  }
+  const typical = {
+    visibleBefore: middleValue(land, function (i) { return before.visible[i]; }),
+    visibleAfter: middleValue(land, function (i) { return after.visible[i]; }),
+    visibleChange: middleValue(land, function (i) { return after.visible[i] / before.visible[i]; }),
+    swirChange: middleValue(land, function (i) { return after.swir[i] / before.swir[i]; })
+  };
+  // Squares near water or plants, where brightening is usually ground drying out
+  const nearWater = nearSquares(grid, NEAR_WATER_SQUARES, function (i) { return before.water[i] || after.water[i]; });
+  const nearPlants = nearSquares(grid, NEAR_PLANTS_SQUARES, function (i) {
+    return before.ndvi[i] >= PLANTS_NDVI || after.ndvi[i] >= PLANTS_NDVI;
+  });
 
   for (let i = 0; i < kinds.length; i++) {
     let kind = NO_CHANGE;
@@ -652,15 +698,42 @@ function compareScores(before, after, grid) {
       } else if (ndbiChange >= NDBI_THRESHOLD) {
         const wasWet = before.swir[i] < WET_SWIR; // wet ground absorbs short-wave infrared
         const newShadow = after.swir[i] < SHADOW_DARKENING * before.swir[i];
-        if (!wasWet && !newShadow) {
+        // Solar panels, dark roofs and asphalt: already dark, and only got darker
+        // (dust blown off or cleaned, or a longer shadow), so nothing new was built
+        const alreadyDark = before.visible[i] < ALREADY_DARK * typical.visibleBefore;
+        const gotDarker = after.visible[i] < before.visible[i] * typical.visibleChange && after.swir[i] < before.swir[i];
+        if (!wasWet && !newShadow && !(alreadyDark && gotDarker)) {
           kind = NEW_BUILT_OR_BARE;
         }
+      }
+      if (kind === NO_CHANGE && isBrightNewSurface(i)) {
+        kind = BRIGHT_SURFACE;
       }
     }
     kinds[i] = kind;
   }
 
+  // Bright new surfaces: white fill on a building plot gets much brighter in visible
+  // light, but often not in short-wave infrared, so the built-up score can even go down.
+  function isBrightNewSurface(i) {
+    const visibleRise = after.visible[i] / (before.visible[i] * typical.visibleChange);
+    const swirRise = after.swir[i] / (before.swir[i] * typical.swirChange);
+    return visibleRise >= BRIGHTENING &&
+      after.visible[i] >= BRIGHT_AFTER * typical.visibleAfter &&
+      // Ground drying out brightens most in short-wave infrared, because water absorbs it;
+      // new fill brightens most in visible light
+      visibleRise > swirRise &&
+      before.swir[i] >= WET_SWIR && // not wet ground before
+      after.swir[i] <= before.swir[i] / SHADOW_DARKENING && // not a shadow that went away
+      !nearWater[i] && !nearPlants[i];
+  }
+
   kinds = removeLoneSquares(kinds, grid.columns, grid.rows);
+  // Brightening alone is a weaker sign than the scores, so it must cover a bigger patch
+  const brightSquares = keepBigPatches(kinds, grid.columns, grid.rows, BRIGHT_SURFACE, BRIGHT_MIN_SQUARES);
+  for (let i = 0; i < kinds.length; i++) {
+    if (kinds[i] === BRIGHT_SURFACE) kinds[i] = NEW_BUILT_OR_BARE; // shown as new buildings or bare ground
+  }
 
   // Count how many squares there are of each kind
   const counts = { [NO_CHANGE]: 0, [SKIPPED]: 0 };
@@ -668,7 +741,63 @@ function compareScores(before, after, grid) {
   for (let i = 0; i < kinds.length; i++) {
     counts[kinds[i]]++;
   }
-  return { kinds: kinds, counts: counts };
+  return { kinds: kinds, counts: counts, brightSquares: brightSquares };
+}
+
+// The middle value of value(i) over a list of squares (half are higher, half lower)
+function middleValue(squares, value) {
+  const values = new Float32Array(squares.length);
+  for (let k = 0; k < squares.length; k++) values[k] = value(squares[k]);
+  values.sort();
+  return values.length ? values[Math.floor(values.length / 2)] : NaN;
+}
+
+// Marks every square within "reach" squares of one where test(i) is true
+function nearSquares(grid, reach, test) {
+  const near = new Uint8Array(grid.columns * grid.rows);
+  for (let row = 0; row < grid.rows; row++) {
+    for (let column = 0; column < grid.columns; column++) {
+      if (!test(row * grid.columns + column)) continue;
+      for (let r = Math.max(0, row - reach); r <= Math.min(grid.rows - 1, row + reach); r++) {
+        for (let c = Math.max(0, column - reach); c <= Math.min(grid.columns - 1, column + reach); c++) {
+          near[r * grid.columns + c] = 1;
+        }
+      }
+    }
+  }
+  return near;
+}
+
+// Removes patches of one kind smaller than minSquares (touching squares, also
+// corner to corner, make a patch). Changes "kinds" in place and returns how many squares are kept.
+function keepBigPatches(kinds, columns, rows, kind, minSquares) {
+  const seen = new Uint8Array(kinds.length);
+  let kept = 0;
+  for (let start = 0; start < kinds.length; start++) {
+    if (kinds[start] !== kind || seen[start]) continue;
+    // Find the whole patch, spreading out from this square
+    const patch = [start];
+    seen[start] = 1;
+    for (let k = 0; k < patch.length; k++) {
+      const row = Math.floor(patch[k] / columns);
+      const column = patch[k] % columns;
+      for (let r = Math.max(0, row - 1); r <= Math.min(rows - 1, row + 1); r++) {
+        for (let c = Math.max(0, column - 1); c <= Math.min(columns - 1, column + 1); c++) {
+          const i = r * columns + c;
+          if (kinds[i] === kind && !seen[i]) {
+            seen[i] = 1;
+            patch.push(i);
+          }
+        }
+      }
+    }
+    if (patch.length >= minSquares) {
+      kept += patch.length;
+    } else {
+      for (const i of patch) kinds[i] = NO_CHANGE;
+    }
+  }
+  return kept;
 }
 
 // Real changes (a building site, a cleared field) cover a patch of ground.
@@ -738,6 +867,18 @@ function showSummary(counts, totalSquares) {
   document.getElementById("change-total").textContent = numbers.totalSentence;
   document.getElementById("pct-skipped").textContent = numbers.skipped;
   changeSection.hidden = false;
+}
+
+// Says how much of "new buildings or bare ground" was found by brightening alone
+function showBrightNote(brightSquares) {
+  const note = document.getElementById("bright-note");
+  note.hidden = brightSquares === 0;
+  note.textContent = brightSquaresText(brightSquares);
+}
+
+function brightSquaresText(brightSquares) {
+  return "New buildings or bare ground includes " + formatArea(brightSquares * SQUARE_AREA_M2) +
+    " of bright new surface, like white fill, that only got brighter.";
 }
 
 // The summary's sizes and percentages as text, for the panel and the PDF report.
@@ -866,10 +1007,14 @@ findButton.addEventListener("click", async function () {
       changeLayer = drawChanges(grid, result.kinds).addTo(map);
       lastResult = {
         area: chosenArea, grid: grid, kinds: result.kinds, counts: result.counts,
-        before: before, after: after, sameView: pair.sameView
+        brightSquares: result.brightSquares, before: before, after: after, sameView: pair.sameView,
+        afterScores: afterScores, // kept for the year-apart check (section 4f)
+        yearCheck: null
       };
       changeToggle.textContent = "Hide changes";
       showSummary(result.counts, result.kinds.length);
+      showBrightNote(result.brightSquares);
+      showSeasonNote(lastResult);
       statusText.textContent = "Done. Drag the slider to compare the photos under the coloured changes.";
     }
 
@@ -893,6 +1038,133 @@ changeToggle.addEventListener("click", function () {
     changeLayer.addTo(map);
     changeToggle.textContent = "Hide changes";
   }
+});
+
+// =====================================================
+// 4f. Seasons: are some plant changes just the time of year?
+// =====================================================
+// Lawns, crops and trees green up and dry out through the year. Between images
+// from different seasons that looks like plants gained or lost, even when nothing
+// was planted or cleared. Comparing the after image with one from the same time a
+// year earlier takes the season out: plant changes that don't show up a year
+// apart are probably seasonal.
+
+const seasonNote = document.getElementById("season-note");
+const seasonText = document.getElementById("season-text");
+const yearCheckButton = document.getElementById("year-check-button");
+const yearCheckToggle = document.getElementById("year-check-toggle");
+const yearCheckText = document.getElementById("year-check-text");
+
+// The season of a date, using the weather seasons (December to February is
+// winter in the north). South of the equator the seasons are the other way round.
+function seasonOf(isoText, lat) {
+  const month = Number(isoText.slice(5, 7)); // 1 to 12
+  const index = Math.floor((month % 12) / 3); // 0 = Dec-Feb, 1 = Mar-May, 2 = Jun-Aug, 3 = Sep-Nov
+  const names = lat >= 0 ? ["winter", "spring", "summer", "autumn"] : ["summer", "autumn", "winter", "spring"];
+  return names[index];
+}
+
+// The two images' seasons, e.g. { before: "summer", after: "autumn" }
+function imageSeasons(result) {
+  const lat = result.area.getCenter().lat;
+  return {
+    before: seasonOf(result.before.item.properties.datetime, lat),
+    after: seasonOf(result.after.item.properties.datetime, lat)
+  };
+}
+
+function seasonWarning(seasons) {
+  return "Your images are from different seasons (" + seasons.before + " and " + seasons.after + "), " +
+    "so some plant changes may be seasonal: lawns, crops and trees grow and dry out through the year " +
+    "even when nothing is planted or cleared.";
+}
+
+// Shows the warning (and the year-apart check button) if the seasons differ
+function showSeasonNote(result) {
+  const seasons = imageSeasons(result);
+  seasonNote.hidden = seasons.before === seasons.after;
+  seasonText.textContent = seasonWarning(seasons);
+}
+
+yearCheckButton.addEventListener("click", async function () {
+  const result = lastResult;
+  if (!result) return;
+  yearCheckButton.disabled = true;
+  yearCheckText.textContent = "Looking for an image from a year before the after image…";
+  try {
+    const afterDay = dayOf(result.after.item); // e.g. "2026-09-29"
+    let yearEarlier = (Number(afterDay.slice(0, 4)) - 1) + afterDay.slice(4);
+    if (yearEarlier.endsWith("-02-29")) yearEarlier = yearEarlier.replace("-02-29", "-02-28"); // no 29 February
+    const token = await getToken();
+    const candidates = await findClearImages(result.area, yearEarlier, token, result.after.item);
+    const pair = choosePair(candidates, [result.after]);
+    if (lastResult !== result) return; // a new search started meanwhile
+    if (!pair) {
+      yearCheckText.textContent = "No image covering the whole area was found within " + SEARCH_WINDOW_DAYS +
+        " days of " + niceDate(yearEarlier + "T12:00:00Z") + ".";
+      yearCheckButton.disabled = false;
+      return;
+    }
+    yearCheckText.textContent = "Reading the image from " + niceDate(pair.before.item.properties.datetime) + "…";
+    const earlierScores = await readScores(pair.before.item, result.grid, token);
+    if (lastResult !== result) return;
+    const check = compareScores(earlierScores, result.afterScores, result.grid);
+    result.yearCheck = {
+      before: pair.before, sameView: pair.sameView, kinds: check.kinds, counts: check.counts,
+      seasonal: probablySeasonal(result.kinds, check.kinds)
+    };
+    yearCheckText.textContent = yearCheckSummary(result);
+    yearCheckButton.hidden = true;
+    yearCheckToggle.hidden = false;
+  } catch (error) {
+    console.warn("Year-apart check failed:", error);
+    if (lastResult !== result) return;
+    yearCheckText.textContent = "Sorry, the year-apart check didn't work. Please try again in a moment.";
+    yearCheckButton.disabled = false;
+  }
+});
+
+// How many squares of plant change between the chosen dates don't show the same
+// change a year apart (only counting squares the year-apart check could see)
+function probablySeasonal(kinds, yearApartKinds) {
+  let plantSquares = 0;
+  let seasonal = 0;
+  for (let i = 0; i < kinds.length; i++) {
+    if (kinds[i] !== PLANTS_GAINED && kinds[i] !== PLANTS_LOST) continue;
+    plantSquares++;
+    if (yearApartKinds[i] !== kinds[i] && yearApartKinds[i] !== SKIPPED) seasonal++;
+  }
+  return { plantSquares: plantSquares, seasonalSquares: seasonal };
+}
+
+// The year-apart check's result in words, for the panel and the report
+function yearCheckSummary(result) {
+  const check = result.yearCheck;
+  const numbers = summaryNumbers(check.counts, check.kinds.length);
+  let text =
+    "A year apart (" + describeImage(check.before) + " to " + niceDate(result.after.item.properties.datetime) +
+    "): plants gained " + numbers[PLANTS_GAINED].size + ", plants lost " + numbers[PLANTS_LOST].size + ". ";
+  const { plantSquares, seasonalSquares } = check.seasonal;
+  if (plantSquares === 0) {
+    text += "Your dates show no plant change, so there is nothing seasonal to explain.";
+  } else {
+    text += "Of the " + formatArea(plantSquares * SQUARE_AREA_M2) + " of plant change between your dates, " +
+      formatArea(seasonalSquares * SQUARE_AREA_M2) + " (" + Math.round((100 * seasonalSquares) / plantSquares) +
+      "%) doesn't show up a year apart, so it is probably seasonal.";
+  }
+  if (!check.sameView) {
+    text += " The year-earlier image is from a different satellite path, so tall buildings may lean differently.";
+  }
+  return text;
+}
+
+// Switches the map between the chosen dates' changes and the year-apart changes
+yearCheckToggle.addEventListener("click", function () {
+  if (!lastResult || !lastResult.yearCheck || !changeLayer) return;
+  const showingYearApart = yearCheckToggle.textContent.startsWith("Show your");
+  const kinds = showingYearApart ? lastResult.kinds : lastResult.yearCheck.kinds;
+  changeLayer.setUrl(changesCanvas(lastResult.grid, kinds).toDataURL());
+  yearCheckToggle.textContent = showingYearApart ? "Show year-apart changes" : "Show your dates' changes";
 });
 
 // =====================================================
@@ -1141,7 +1413,7 @@ async function clearestInPeriod(candidates, area, grid, stillWanted) {
     if (!stillWanted()) return null;
     try {
       const bands = await readAreaCutout(item, area, grid);
-      const areaCloud = percentHidden(bands[SCORE_BANDS.indexOf("SCL")]);
+      const areaCloud = percentHidden(bands[SERIES_BANDS.indexOf("SCL")]);
       if (areaCloud > SERIES_MAX_CLOUD) continue; // too cloudy: try the next one
 
       const averages = averageScores(scoresFromBands(item, bands));
@@ -1155,7 +1427,7 @@ async function clearestInPeriod(candidates, area, grid, stillWanted) {
   return null; // no clear image in this period
 }
 
-// Asks the Planetary Computer for the SCORE_BANDS over just the area, as a
+// Asks the Planetary Computer for the SERIES_BANDS over just the area, as a
 // small GeoTIFF with one pixel per grid point. Its rows and columns run along
 // latitude and longitude, from the north-west corner, exactly like makeGrid,
 // so pixel i is grid point i. "nearest" keeps SCL's class numbers exact.
@@ -1164,14 +1436,14 @@ async function readAreaCutout(item, area, grid) {
     CUTOUT_URL + [area.getWest(), area.getSouth(), area.getEast(), area.getNorth()].join(",") +
     "/" + grid.columns + "x" + grid.rows + ".tif" +
     "?collection=sentinel-2-l2a&item=" + item.id +
-    SCORE_BANDS.map(function (band) { return "&assets=" + band; }).join("") +
+    SERIES_BANDS.map(function (band) { return "&assets=" + band; }).join("") +
     "&resampling=nearest&reproject=nearest";
   const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
   if (!response.ok) throw new Error("The cut-out failed with error " + response.status);
   const tiff = await GeoTIFF.fromArrayBuffer(await response.arrayBuffer());
   const image = await tiff.getImage();
   const bands = await image.readRasters();
-  return bands.slice(0, SCORE_BANDS.length); // (one more band says which pixels have data; not needed)
+  return bands.slice(0, SERIES_BANDS.length); // (one more band says which pixels have data; not needed)
 }
 
 // The average NDVI and NDBI over the clear, dry-land squares
@@ -1746,7 +2018,15 @@ async function makeReport(result) {
   }
   y += 2;
   paragraph(numbers.totalSentence);
+  if (result.brightSquares > 0) paragraph(brightSquaresText(result.brightSquares));
   paragraph("Skipped because of cloud, shadow or missing data: " + numbers.skipped + ".");
+  const seasons = imageSeasons(result);
+  if (seasons.before !== seasons.after) {
+    paragraph("Seasons: " + seasonWarning(seasons), { bold: true });
+    paragraph(result.yearCheck
+      ? yearCheckSummary(result)
+      : "The year-apart check (comparing the after image with one from a year earlier) was not run.");
+  }
   paragraph("Each 10 m square counts as 100 m². A hectare (ha) is 10,000 m²: a square 100 m long on each side.",
     { grey: true, size: 9 });
 
@@ -1781,7 +2061,17 @@ async function makeReport(result) {
   paragraph("New buildings or bare ground: NDBI rose by at least " + NDBI_THRESHOLD.toFixed(2) +
     ", except where the ground was wet before (short-wave infrared reflectance below " + WET_SWIR.toFixed(2) +
     ") or became much darker (less than " + Math.round(SHADOW_DARKENING * 100) + "% as bright, " +
-    "usually a new shadow).");
+    "usually a new shadow). Surfaces that were already dark (less than " + Math.round(ALREADY_DARK * 100) +
+    "% as bright as the area's typical ground, like solar panels, dark roofs and asphalt) and only got darker " +
+    "are not counted either: dust, cleaning and shadows do that.");
+  paragraph("Bright new surfaces, like white fill, can lower NDBI, so they are also counted as new buildings or " +
+    "bare ground when visible brightness (the average of bands B02, B03 and B04) rose at least " +
+    Math.round((BRIGHTENING - 1) * 100) + "% more than the area's typical change, ended at least " +
+    Math.round((BRIGHT_AFTER - 1) * 100) + "% brighter than the area's typical ground, and rose more than " +
+    "short-wave infrared did, over a patch of at least " + formatArea(BRIGHT_MIN_SQUARES * SQUARE_AREA_M2) +
+    ". Ground within " + NEAR_WATER_SQUARES * CHANGE_PIXEL_METRES + " m of water or " +
+    NEAR_PLANTS_SQUARES * CHANGE_PIXEL_METRES + " m of plants is left out, because drying out makes it " +
+    "brighter too.");
   paragraph("Burned: the burn ratio, NBR = (near-infrared - longer short-wave infrared) / (near-infrared + longer " +
     "short-wave infrared), from bands B8A and B12, fell by at least " + BURN_THRESHOLD.toFixed(2) + " (a moderate " +
     "burn on the usual scale), where there were some plants to burn (NDVI of at least " + BURN_FUEL_NDVI.toFixed(2) +
@@ -1800,7 +2090,8 @@ async function makeReport(result) {
   bullet("Tall towers can cause a little false 'new buildings or bare ground' at their feet as shadows change " +
     "with the seasons.");
   bullet("Haze, the sun's angle and the season change the scores a little; the thresholds above ignore most " +
-    "of this, but not all.");
+    "of this, but not all. Lawns and trees greening or drying with the seasons show as plants gained or lost.");
+  bullet("Real changes to surfaces that were already dark (like new panels on an old solar farm) are missed.");
   bullet("This is a quick guide, not a survey. Check the before and after photos before drawing conclusions.");
 
   // --- Credits ---
@@ -1929,6 +2220,12 @@ function clearComparison() {
   beforeInfo.textContent = "-";
   afterInfo.textContent = "-";
   changeSection.hidden = true;
+  seasonNote.hidden = true;
+  yearCheckText.textContent = "";
+  yearCheckButton.hidden = false;
+  yearCheckButton.disabled = false;
+  yearCheckToggle.hidden = true;
+  yearCheckToggle.textContent = "Show year-apart changes";
   brightnessRow.hidden = true;
   zoomNote.hidden = true;
   clearTimeSeries();

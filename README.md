@@ -27,6 +27,7 @@ It runs entirely in your web browser. There is no server and no API key: it is j
    - **Place details** for the centre of your area: elevation, weather, climate, soil, land cover and wildlife.
 5. **Drag the slider** at the bottom to swipe between the before photo (left of the line) and the after photo (right of the line).
 6. **Press Hide changes** to see the photos without the coloured squares, and **Show changes** to bring them back.
+   - If the two photos are from **different seasons** (say summer and autumn), a yellow note warns that some plant changes may just be the time of year. Press **Compare with a year earlier** to check: the after photo is compared with one from the same time a year before (from the same satellite path if possible). The note then says how much of your plant change doesn't show up a year apart, so is probably seasonal. **Show year-apart changes** puts that comparison on the map, and **Show your dates' changes** switches back.
 7. **Over time**: after the changes, the panel looks for a clear photo about every 2 weeks between your two dates and charts the area's average **plant score (NDVI)** and **built-up score (NDBI)**.
    - **Click a point** on the chart to show that photo on the map, with its date at the top.
    - **Press Play** for a timelapse of all the photos in date order. **Speed** sets how long each one stays on screen.
@@ -47,7 +48,7 @@ Tips:
 |---|---|
 | 🟩 Green | Plants gained |
 | 🟥 Red | Plants lost |
-| 🟦 Blue | New buildings or bare ground (land cleared, dug up or built on) |
+| 🟦 Blue | New buildings or bare ground (land cleared, dug up, built on or covered in bright fill) |
 | 🟫 Dark orange | Burned (plants burned by a fire) |
 | Grey | Skipped: hidden by cloud, cloud shadow or missing data in one of the photos |
 
@@ -69,10 +70,11 @@ Sentinel-2 is a group of European satellites that photograph the whole Earth eve
 
 ### 2. Reading the light bands
 
-A Sentinel-2 photo is stored as several files, one per **band** (colour of light). The tool uses six:
+A Sentinel-2 photo is stored as several files, one per **band** (colour of light). The tool uses eight:
 
 | Band | Light | Pixel size | Why |
 |---|---|---|---|
+| B02, B03 | Blue, green | 10 m | With red, they give visible brightness, which shows bright new surfaces like white fill |
 | B04 | Red | 10 m | Plants absorb red light |
 | B08 | Near-infrared | 10 m | Plants reflect lots of this invisible light |
 | B8A | Near-infrared (narrow) | 20 m | Paired with B11 for the built-up score, and with B12 for the burn ratio |
@@ -86,7 +88,7 @@ The tool covers your area with a grid of **10 m squares** and looks up each band
 
 ### 3. Three scores for every square
 
-For each date, every square gets three scores between −1 and +1:
+For each date, every square gets three scores between −1 and +1, and a **visible brightness**: the average of its blue, green and red reflectance.
 
 - **NDVI, the plant greenness score** = (near-infrared − red) ÷ (near-infrared + red)
   Plants reflect much more near-infrared than red. About **0.5 or more** means lush plants, about **0.2** sparse plants, and **near 0 or below** sand, concrete or water.
@@ -122,23 +124,46 @@ For burns, two look-alikes are ruled out:
 - **Shadows, water and new dark roofs** get darker in *every* band, including B12. Burned ground doesn't, so a square that became less than **60%** as bright in B12 isn't counted as burned.
 - **Wet mud drying out** (tidal flats) also lowers NBR, but it gets *brighter* in near-infrared. Burning always makes ground reflect less near-infrared, so a square must get darker in near-infrared to count as burned.
 
+**Surfaces that were already dark.** Solar panels, dark roofs and asphalt change with dust, cleaning and the light. When dust is washed off a solar panel field it gets darker in near-infrared more than in short-wave infrared, so NDBI goes up, although nothing new was built. So a square isn't counted as new buildings or bare ground if it was **already dark** before (less than **80%** as bright as the area's typical ground) *and* only **got darker** (in visible light, compared with the area as a whole, and in short-wave infrared). Ground that was bright before, like sand that new panels or a dark roof are put on, still counts.
+
+### 4b. Bright new surfaces
+
+White fill, fresh sand, gravel and new concrete make a plot much brighter in visible light, but often not in short-wave infrared, so NDBI can even go **down** and the rules above miss them. So a square that didn't change by those rules also counts as **new buildings or bare ground** if:
+
+| Check | Why |
+|---|---|
+| Its visible brightness rose at least **30%** more than the area's typical change | Haze and the sun's angle brighten or dim the whole area, so each square is compared with the middle value over the area's clear land, not with a fixed number |
+| It ends up at least **15%** brighter than the area's typical ground | It is a *bright* new surface, not ordinary ground that was dark before |
+| It brightened more in visible light than in short-wave infrared | Wet ground drying out brightens most in short-wave infrared, because water absorbs it |
+| It wasn't wet before, or in a shadow that went away | The same checks as above, the other way round |
+| It is more than **30 m** from water and **20 m** from plants | Tides wet and dry the sand by the shore, and watering wets the ground beside lawns and trees |
+| It is part of a patch of at least **25 squares (2,500 m²)** | Brightening alone is a weaker sign than the scores. Fill is spread over plots, while a single repainted roof or a parked lorry is smaller |
+
+The summary says how much of the blue was found this way.
+
+### 4c. Seasons
+
+Between summer and autumn, or winter and spring, lawns, crops and trees grow and dry out without anything being planted or cleared, and that shows as plants gained or lost. So when the two photos are from different seasons (weather seasons: December to February is winter in the north, and the other way round south of the equator), the panel shows a warning.
+
+**Compare with a year earlier** checks this. It looks for a clear photo within 20 days of exactly a year before the after photo, from the same satellite path if there is one, and compares it with the after photo using the same rules. Squares with plant change between your dates that *don't* change the same way a year apart are probably seasonal. Squares the year-apart check couldn't see because of cloud aren't counted either way.
+
 ### 5. Ignoring lone squares
 
-Real changes, like a building site or a cleared field, cover a patch of ground. A single changed square on its own is usually just noise. So **a changed square only stays if at least 2 of its 8 neighbours changed the same way.**
+Real changes, like a building site or a cleared field, cover a patch of ground. A single changed square on its own is usually just noise. So **a changed square only stays if at least 2 of its 8 neighbours changed the same way.** Bright new surfaces must also form a patch of at least 25 squares (see 4b).
 
 ### 6. The time series
 
 One catalogue search finds every photo between the two dates. Only photos from the **same satellite path and tile as the before photo** are kept, so they all line up. The dates are split into 2-week periods (longer for ranges over about 2 years, so there are never more than 60). In each period, up to 3 of the least cloudy photos are tried in turn. The first with **at most 10% of the area hidden** by cloud, shadow or missing data (the same scene-classification check as above) is used. Its averages leave out skipped squares and water.
 
-To keep downloads small, the photo files aren't read directly for this. They store pixels in blocks about 10 km across, so even a small area would cost about 2 MB per photo. Instead Planetary Computer cuts out just the area, sampled at up to 100 × 100 points with all five bands in one small file (about 120 KB). A year of photos over a 2 km area is about 3.5 MB.
+To keep downloads small, the photo files aren't read directly for this. They store pixels in blocks about 10 km across, so even a small area would cost about 2 MB per photo. Instead Planetary Computer cuts out just the area, sampled at up to 100 × 100 points with the six bands it needs (not blue and green) in one small file (about 120 KB). A year of photos over a 2 km area is about 3.5 MB.
 
 ### How well does it work?
 
-It was tested on six sites around Abu Dhabi (3 July to 1 October 2026): three with real change and three where nothing changed. **3 were correct, 2 partly correct and 1 wrong.**
+It was tested on eight sites (3 July to 1 October 2026): six around Abu Dhabi, a new town south of the city and a solar park in Dubai. **4 were correct, 2 partly correct and 2 wrong.** The first six were also tested before the rules for bright surfaces, dark surfaces and seasons were added (then: 3 correct, 2 partly, 1 wrong).
 
-- ✅ It found construction and earthworks in the right places (Masdar City, Lulu Island). Finished neighbourhoods stayed under 1% flagged (Al Khalidiyah, Khalifa City A).
-- ⚠️ It **missed a plot covered in bright white fill**, because the built-up score went down instead of up. It also **flagged a solar panel field** at Masdar.
-- ❌ In a park, **lawns greening after the summer** were flagged as plants gained. Compare the same month in two years to avoid seasonal changes.
+- ✅ It found earthworks and white fill in the right places (Lulu Island, most of a white plot at Khalifa City), and panels put back into three blocks of the Dubai solar park. Finished neighbourhoods stayed under 1% flagged (Al Khalidiyah, Khalifa City A).
+- ⚠️ False alarms on Masdar's solar panel field fell from about 3 ha to under 1 ha, but less of Masdar's construction is found too. The centre of the white plot, which was wet before, is still missed.
+- ❌ **Scattered new villas** (Riyadh City) are too small to find. In a park, **lawns greening after the summer** are still flagged as plants gained, but the page warns about it, and the year-apart check put 73% of it down as probably seasonal.
 - 🔥 **Burns** were tested on the 2025 Palisades fire in Los Angeles. **99.7%** of the squares marked burned were inside the official fire perimeter. **64%** of the burned land was marked burned, and another 21% as plants lost. Around Abu Dhabi almost nothing was marked burned (0.1% or less), even on tidal mud, solar panels and winter tower shadows.
 
 Full results, pictures and how the sites were chosen: **[VALIDATION.md](VALIDATION.md)**.
@@ -169,6 +194,9 @@ Sentinel-2 images contain modified Copernicus Sentinel data. Licences and full c
 - **Small things are missed.** Sentinel-2's sharpest pixels are 10 m across, and a change needs a small patch of squares, so anything smaller than about 20 m (a single villa, say) won't show. Zoomed in to street level, the photos look blurry for the same reason.
 - **Water change and land reclamation aren't detected.** Shorelines are left out because tides make them unreliable over short periods.
 - **Tall towers can cause a little false blue** at their feet as shadows change with the seasons (about 0.5% in a dense neighbourhood in testing).
+- **Bright fill on ground that was wet before isn't counted.** Wet ground drying out also turns pale, and from space the two look the same, so wet ground is always left out.
+- **Changes to surfaces that were already dark can be missed**, for example new panels added to an old solar farm, because those are left out to stop dust and cleaning looking like change.
+- **Seasons**: lawns, crops and trees greening or drying out show as plants gained or lost. The panel warns when the photos are from different seasons, and **Compare with a year earlier** shows how much is probably seasonal.
 - **Areas up to 10 km × 10 km** for change detection. Larger areas would download too much data into the browser.
 - **The cloud check only uses the 6 most promising photos** near each date. If they are all cloudy over your area, try other dates.
 - **The time series is an average over the whole area**, so a building site that covers a small part of it only moves the lines a little. Draw the area tightly around the place you're interested in.
@@ -197,7 +225,7 @@ Then open **http://localhost:8000** in your browser. Press **Ctrl+C** in the ter
 | `style.css` | How everything looks |
 | `main.js` | All the code: map, choosing an area and dates, finding images, reading bands, change detection, time series and timelapse, downloads, swipe slider, place details |
 | `CREDITS.md` | Data sources, libraries and licences |
-| `VALIDATION.md` | Test results on six sites around Abu Dhabi |
+| `VALIDATION.md` | Test results on eight sites, before and after the latest rule changes |
 | `docs/validation/` | Before, after and result pictures for each test site |
 | `docs/masdar-result.png` | The screenshot in this README |
 
