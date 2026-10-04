@@ -78,6 +78,11 @@
       <div class="buttons">
         <button id="change-toggle" type="button">Hide changes</button>
       </div>
+      <div class="buttons">
+        <button id="report-button" type="button">Download report</button>
+        <button id="geojson-button" type="button">Download GeoJSON</button>
+      </div>
+      <div id="download-status" class="small"></div>
       <details class="small">
         <summary>How are small changes ignored?</summary>
         <p>
@@ -172,6 +177,11 @@
 
   <!-- geotiff.js reads the satellite image files (GeoTIFFs) in the browser -->
   <script src="https://cdn.jsdelivr.net/npm/geotiff@3.0.5/dist-browser/geotiff.js"></script>
+
+  <!-- jsPDF makes the PDF report in the browser -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js"
+          integrity="sha512-plOdviVmws4Y3JAvbnpfKb2hVxKM1lCwsi3vmElYRj+tiDLffZ4FVUj5a8vyKJ9pIgl8JCAHEJ4D1iUKBecswg=="
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
   <!-- proj4 converts latitude/longitude into the satellite images' own map grid (UTM) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.15.0/proj4.js"></script>

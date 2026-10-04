@@ -536,6 +536,12 @@ const CHANGE_COLOURS = {
   [NEW_BUILT_OR_BARE]: [0, 116, 217, 220], // blue
   [SKIPPED]: [150, 150, 150, 110] // see-through grey
 };
+// What each kind of change is called on the page, in the report and in the GeoJSON file
+const CHANGE_NAMES = {
+  [PLANTS_GAINED]: "Plants gained",
+  [PLANTS_LOST]: "Plants lost",
+  [NEW_BUILT_OR_BARE]: "New buildings or bare ground"
+};
 
 // The files store light as whole numbers: reflectance x 10000. Since 2022
 // (processing version 04.00 and later) a 1000 has also been added to every value,
@@ -661,9 +667,18 @@ function removeLoneSquares(kinds, columns, rows) {
   return kept;
 }
 
-// Paints the changes onto a picture, one picture-pixel per grid square,
-// and puts it on the map over the chosen area
+// Puts the changes on the map over the chosen area
 function drawChanges(grid, kinds) {
+  return L.imageOverlay(changesCanvas(grid, kinds).toDataURL(), chosenArea, {
+    pane: "changesPane",
+    className: "change-layer", // style.css keeps the squares sharp instead of blurry
+    interactive: false
+  });
+}
+
+// Paints the changes onto a picture, one picture-pixel per grid square
+// (also used for the map in the PDF report)
+function changesCanvas(grid, kinds) {
   const canvas = document.createElement("canvas");
   canvas.width = grid.columns;
   canvas.height = grid.rows;
@@ -677,16 +692,24 @@ function drawChanges(grid, kinds) {
     }
   }
   context.putImageData(picture, 0, 0);
-
-  return L.imageOverlay(canvas.toDataURL(), chosenArea, {
-    pane: "changesPane",
-    className: "change-layer", // style.css keeps the squares sharp instead of blurry
-    interactive: false
-  });
+  return canvas;
 }
 
 // Writes the sizes and percentages into the panel
 function showSummary(counts, totalSquares) {
+  const numbers = summaryNumbers(counts, totalSquares);
+  for (const [kind, idEnd] of [[PLANTS_GAINED, "gained"], [PLANTS_LOST, "lost"], [NEW_BUILT_OR_BARE, "built"]]) {
+    document.getElementById("size-" + idEnd).textContent = numbers[kind].size;
+    document.getElementById("pct-" + idEnd).textContent = numbers[kind].percent;
+  }
+  document.getElementById("change-total").textContent = numbers.totalSentence;
+  document.getElementById("pct-skipped").textContent = numbers.skipped;
+  changeSection.hidden = false;
+}
+
+// The summary's sizes and percentages as text, for the panel and the PDF report.
+// numbers[kind] = { size: "1,600 m²", percent: "0.4%" } for each kind of change.
+function summaryNumbers(counts, totalSquares) {
   const compared = totalSquares - counts[SKIPPED];
   function percentOfCompared(count) {
     if (compared === 0) return "-";
@@ -697,20 +720,17 @@ function showSummary(counts, totalSquares) {
   function sizeOf(count) {
     return formatArea(count * SQUARE_AREA_M2);
   }
+  const numbers = {};
+  for (const kind of [PLANTS_GAINED, PLANTS_LOST, NEW_BUILT_OR_BARE]) {
+    numbers[kind] = { size: sizeOf(counts[kind]), percent: percentOfCompared(counts[kind]) };
+  }
   const changed = counts[PLANTS_GAINED] + counts[PLANTS_LOST] + counts[NEW_BUILT_OR_BARE];
-
-  document.getElementById("size-gained").textContent = sizeOf(counts[PLANTS_GAINED]);
-  document.getElementById("size-lost").textContent = sizeOf(counts[PLANTS_LOST]);
-  document.getElementById("size-built").textContent = sizeOf(counts[NEW_BUILT_OR_BARE]);
-  document.getElementById("pct-gained").textContent = percentOfCompared(counts[PLANTS_GAINED]);
-  document.getElementById("pct-lost").textContent = percentOfCompared(counts[PLANTS_LOST]);
-  document.getElementById("pct-built").textContent = percentOfCompared(counts[NEW_BUILT_OR_BARE]);
-  document.getElementById("change-total").textContent =
+  numbers.totalSentence =
     "Changed: " + sizeOf(changed) + " (" + percentOfCompared(changed) + ") of the " + sizeOf(compared) +
-    " (" + compared.toLocaleString() + " squares) that could be compared.";
-  document.getElementById("pct-skipped").textContent =
+    " (" + compared.toLocaleString("en-GB") + " squares) that could be compared.";
+  numbers.skipped =
     sizeOf(counts[SKIPPED]) + " (" + ((100 * counts[SKIPPED]) / totalSquares).toFixed(1) + "% of the area)";
-  changeSection.hidden = false;
+  return numbers;
 }
 
 // Writes an area in square metres for small amounts and hectares for larger ones
@@ -810,6 +830,10 @@ findButton.addEventListener("click", async function () {
       const result = compareScores(beforeScores, afterScores, grid);
 
       changeLayer = drawChanges(grid, result.kinds).addTo(map);
+      lastResult = {
+        area: chosenArea, grid: grid, kinds: result.kinds, counts: result.counts,
+        before: before, after: after, sameView: pair.sameView
+      };
       changeToggle.textContent = "Hide changes";
       showSummary(result.counts, result.kinds.length);
       statusText.textContent = "Done. Drag the slider to compare the photos under the coloured changes.";
@@ -883,8 +907,16 @@ async function findDisplayWhite(items, area, token) {
   return Math.max(white, 0.05); // never closer to black than 0.05, even over dark water
 }
 
-// The web address of a photo's map tiles, using the current brightness range
+// The web address of a photo's map tiles, using the current brightness range.
+// "padding" reads 1 pixel past each tile edge, so the blending doesn't leave
+// lines between tiles.
 function tileUrlFor(item) {
+  return TILE_URL + photoSettings(item) + "&padding=1";
+}
+
+// The settings that turn a photo's red, green and blue bands into a picture,
+// for map tiles and for the picture in the PDF report
+function photoSettings(item) {
   // The brightness slider lowers the white point (brighter picture) or raises
   // it (darker picture). 100% = the automatic white point.
   const brightness = brightnessSlider.value / 100;
@@ -895,15 +927,13 @@ function tileUrlFor(item) {
     return Math.round(reflectance * 10000 + offset);
   };
   return (
-    TILE_URL +
     "?collection=sentinel-2-l2a&item=" + item.id +
     "&assets=B04&assets=B03&assets=B02" + // red, green, blue
     "&nodata=0" +
     // Blend neighbouring 10 m pixels smoothly instead of drawing hard squares:
     // "resampling" when the photo is enlarged, "reproject" when it is turned
-    // from the satellite's UTM grid into map tiles. "padding" reads 1 pixel
-    // past each tile edge, so the blending doesn't leave lines between tiles.
-    "&resampling=bilinear&reproject=bilinear&padding=1" +
+    // from the satellite's UTM grid into map tiles
+    "&resampling=bilinear&reproject=bilinear" +
     "&rescale=" + toStored(0) + "," + toStored(white) // black, white
   );
 }
@@ -1359,6 +1389,463 @@ function clearTimeSeries() {
   seriesSection.hidden = true;
 }
 
+// =====================================================
+// 4f. Downloads: a PDF report, and the changes as GeoJSON
+// =====================================================
+// GitHub Pages only serves files and has no server to make documents, so
+// both downloads are made right here in the browser and saved from memory.
+
+const reportButton = document.getElementById("report-button");
+const geojsonButton = document.getElementById("geojson-button");
+const downloadStatus = document.getElementById("download-status");
+
+// The latest change results, kept for the downloads (null = none):
+// { area, grid, kinds, counts, before, after, sameView }
+let lastResult = null;
+
+// Saves something made in the browser as a file in the Downloads folder
+function saveFile(blob, fileName) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(function () {
+    URL.revokeObjectURL(link.href);
+  }, 10000);
+}
+
+// Turns "2026-07-31T06:46:29Z" into "2026-07-31", for file names
+function dayOf(item) {
+  return item.properties.datetime.slice(0, 10);
+}
+
+// --- GeoJSON ---
+// GeoJSON is a common text format for map shapes. Squares of the same kind of
+// change that share a side are joined into one shape (a polygon), and each
+// shape gets its kind of change and size as "properties".
+
+geojsonButton.addEventListener("click", function () {
+  if (!lastResult) return;
+  const data = changesGeoJson(lastResult);
+  const text = JSON.stringify(data);
+  saveFile(new Blob([text], { type: "application/geo+json" }),
+    "changes_" + dayOf(lastResult.before.item) + "_" + dayOf(lastResult.after.item) + ".geojson");
+  downloadStatus.textContent = "Saved " + data.features.length + " shapes.";
+});
+
+function changesGeoJson(result) {
+  const grid = result.grid;
+  const kinds = result.kinds;
+  const area = result.area;
+  // Grid corners to longitude and latitude. Corner (x, y) is x squares from
+  // the west edge and y squares from the north edge. 6 decimals is about 10 cm.
+  function cornerPosition(x, y) {
+    const lng = area.getWest() + (x * (area.getEast() - area.getWest())) / grid.columns;
+    const lat = area.getNorth() - (y * (area.getNorth() - area.getSouth())) / grid.rows;
+    return [Number(lng.toFixed(6)), Number(lat.toFixed(6))];
+  }
+
+  const shapeOf = new Int32Array(kinds.length).fill(-1); // which shape each square belongs to
+  const features = [];
+  for (let first = 0; first < kinds.length; first++) {
+    const kind = kinds[first];
+    if (!CHANGE_NAMES[kind] || shapeOf[first] !== -1) continue;
+
+    // Collect every square of the same kind joined to this one by shared sides
+    // (a "flood fill": keep adding neighbours of squares already found)
+    const shape = features.length;
+    const squares = [first];
+    shapeOf[first] = shape;
+    for (let k = 0; k < squares.length; k++) {
+      const row = Math.floor(squares[k] / grid.columns);
+      const column = squares[k] % grid.columns;
+      for (const [r, c] of [[row - 1, column], [row + 1, column], [row, column - 1], [row, column + 1]]) {
+        const j = r * grid.columns + c;
+        if (r >= 0 && r < grid.rows && c >= 0 && c < grid.columns && kinds[j] === kind && shapeOf[j] === -1) {
+          shapeOf[j] = shape;
+          squares.push(j);
+        }
+      }
+    }
+
+    function inShape(x, y) {
+      return x >= 0 && x < grid.columns && y >= 0 && y < grid.rows && shapeOf[y * grid.columns + x] === shape;
+    }
+    const rings = outlineRings(squares, grid.columns, inShape).map(function (ring) {
+      return ring.map(function ([x, y]) { return cornerPosition(x, y); });
+    });
+
+    // GeoJSON wants the outside edge first and going anticlockwise, then any
+    // holes going clockwise. The outside edge is the ring enclosing the most.
+    rings.sort(function (a, b) { return Math.abs(signedArea(b)) - Math.abs(signedArea(a)); });
+    rings.forEach(function (ring, i) {
+      const anticlockwise = signedArea(ring) > 0;
+      if ((i === 0) !== anticlockwise) ring.reverse();
+    });
+
+    const squareMetres = squares.length * SQUARE_AREA_M2;
+    const colour = CHANGE_COLOURS[kind];
+    features.push({
+      type: "Feature",
+      properties: {
+        change: CHANGE_NAMES[kind],
+        area_ha: Number((squareMetres / 10000).toFixed(2)),
+        area_m2: squareMetres,
+        squares: squares.length,
+        before_image: dayOf(result.before.item),
+        after_image: dayOf(result.after.item),
+        // Colours for map viewers that understand them (such as geojson.io)
+        fill: "#" + colour.slice(0, 3).map(function (n) { return n.toString(16).padStart(2, "0"); }).join(""),
+        "fill-opacity": 0.6,
+        stroke: "#ffffff",
+        "stroke-width": 1
+      },
+      geometry: { type: "Polygon", coordinates: rings }
+    });
+  }
+  return { type: "FeatureCollection", features: features };
+}
+
+// Traces the outline of a group of squares along the grid lines.
+// Every side of a square that doesn't touch another square of the group is a
+// piece of the outline. Each piece goes clockwise around its own square (as
+// seen on screen), so following pieces end-to-start gives closed rings: one
+// for the outside edge, and one around each hole.
+function outlineRings(squares, columns, inShape) {
+  const pieces = new Map(); // start corner "x,y" -> list of end corners
+  function addPiece(x1, y1, x2, y2) {
+    const key = x1 + "," + y1;
+    if (!pieces.has(key)) pieces.set(key, []);
+    pieces.get(key).push([x2, y2]);
+  }
+  for (const i of squares) {
+    const x = i % columns;
+    const y = Math.floor(i / columns);
+    if (!inShape(x, y - 1)) addPiece(x, y, x + 1, y); // top side, going right
+    if (!inShape(x + 1, y)) addPiece(x + 1, y, x + 1, y + 1); // right side, going down
+    if (!inShape(x, y + 1)) addPiece(x + 1, y + 1, x, y + 1); // bottom side, going left
+    if (!inShape(x - 1, y)) addPiece(x, y + 1, x, y); // left side, going up
+  }
+
+  const rings = [];
+  for (const [startKey, ends] of pieces) {
+    while (ends.length > 0) {
+      const start = startKey.split(",").map(Number);
+      const ring = [start];
+      let previous = start;
+      let corner = ends.pop();
+      while (corner[0] !== start[0] || corner[1] !== start[1]) {
+        ring.push(corner);
+        // Where two squares meet only at a corner, two pieces leave that corner.
+        // Take the one turning left (on screen), around the empty square there.
+        // That way no ring passes through the same corner twice, which map
+        // software counts as a broken shape. (Two rings may touch at a corner.)
+        const choices = pieces.get(corner[0] + "," + corner[1]);
+        const dx = corner[0] - previous[0];
+        const dy = corner[1] - previous[1];
+        let pick = choices.findIndex(function ([x, y]) { return x === corner[0] + dy && y === corner[1] - dx; });
+        if (pick === -1) pick = choices.length - 1;
+        previous = corner;
+        corner = choices.splice(pick, 1)[0];
+      }
+      ring.push(start); // GeoJSON rings end where they start
+      rings.push(withoutStraightRuns(ring));
+    }
+  }
+  return rings;
+}
+
+// Removes corners in the middle of straight lines, so a 10-square edge is
+// stored as 2 corners instead of 11
+function withoutStraightRuns(ring) {
+  const kept = [ring[0]];
+  for (let i = 1; i < ring.length - 1; i++) {
+    const [ax, ay] = kept[kept.length - 1];
+    const [bx, by] = ring[i];
+    const [cx, cy] = ring[i + 1];
+    const straight = (bx - ax) * (cy - by) - (by - ay) * (cx - bx) === 0;
+    if (!straight) kept.push(ring[i]);
+  }
+  kept.push(ring[ring.length - 1]);
+  return kept;
+}
+
+// Positive if a ring of [x, y] points goes anticlockwise (the "shoelace formula")
+function signedArea(ring) {
+  let total = 0;
+  for (let i = 0; i < ring.length - 1; i++) {
+    total += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+  }
+  return total / 2;
+}
+
+// --- PDF report ---
+// Made with jsPDF. Sizes are in millimetres on an A4 page (210 x 297 mm).
+
+reportButton.addEventListener("click", async function () {
+  if (!lastResult) return;
+  reportButton.disabled = true;
+  downloadStatus.textContent = "Making the report…";
+  try {
+    const pdf = await makeReport(lastResult);
+    pdf.save("change-report_" + dayOf(lastResult.before.item) + "_" + dayOf(lastResult.after.item) + ".pdf");
+    downloadStatus.textContent = "Report saved.";
+  } catch (error) {
+    console.warn("Report failed:", error);
+    downloadStatus.textContent = "Sorry, the report couldn't be made. Please try again.";
+  } finally {
+    reportButton.disabled = false;
+  }
+});
+
+async function makeReport(result) {
+  const pdf = new window.jspdf.jsPDF({ unit: "mm", format: "a4", compress: true });
+  const left = 15; // page margins
+  const width = 180; // usable width
+  const bottom = 282;
+  let y = 15; // where the next line goes, from the top of the page
+
+  // Starts a new page if the next thing (this many mm tall) won't fit
+  function makeRoom(height) {
+    if (y + height > bottom) {
+      pdf.addPage();
+      y = 15;
+    }
+  }
+  function heading(text) {
+    makeRoom(14);
+    y += 3;
+    pdf.setFont("helvetica", "bold").setFontSize(13).setTextColor(0);
+    pdf.text(text, left, y + 5);
+    y += 9;
+  }
+  // Wrapped text; "indent" leaves room on the left (for bullets)
+  function paragraph(text, options = {}) {
+    const size = options.size || 10;
+    const indent = options.indent || 0;
+    pdf.setFont("helvetica", options.bold ? "bold" : "normal").setFontSize(size).setTextColor(options.grey ? 90 : 0);
+    const lineHeight = size * 0.45;
+    for (const line of pdf.splitTextToSize(text, width - indent)) {
+      makeRoom(lineHeight);
+      pdf.text(line, left + indent, y + lineHeight * 0.8);
+      y += lineHeight;
+    }
+    y += 1.5;
+  }
+  function bullet(text) {
+    makeRoom(5);
+    pdf.setFont("helvetica", "normal").setFontSize(10).setTextColor(0);
+    pdf.text("•", left + 1, y + 3.6);
+    paragraph(text, { indent: 5 });
+  }
+  function picture(dataUrl, pixelWidth, pixelHeight, maxWidth, maxHeight) {
+    const scale = Math.min(maxWidth / pixelWidth, maxHeight / pixelHeight);
+    const w = pixelWidth * scale;
+    const h = pixelHeight * scale;
+    makeRoom(h + 2);
+    pdf.addImage(dataUrl, dataUrl.startsWith("data:image/png") ? "PNG" : "JPEG", left, y, w, h);
+    y += h + 3;
+  }
+
+  const area = result.area;
+  const widthMetres = map.distance(area.getSouthWest(), area.getSouthEast());
+  const heightMetres = map.distance(area.getSouthWest(), area.getNorthWest());
+  const centre = area.getCenter();
+  const numbers = summaryNumbers(result.counts, result.kinds.length);
+
+  // --- Title and area ---
+  pdf.setFont("helvetica", "bold").setFontSize(18);
+  pdf.text("Satellite change report", left, y + 7);
+  y += 11;
+  paragraph("Made on " + niceDate(new Date().toISOString()) + " with Satellite Change Viewer " +
+    "(https://kwetemasego-sego.github.io/change-detection/).", { grey: true, size: 9 });
+  paragraph("Area: " + (widthMetres / 1000).toFixed(1) + " km × " + (heightMetres / 1000).toFixed(1) + " km (" +
+    formatArea(widthMetres * heightMetres) + "), centre " + centre.lat.toFixed(5) + ", " + centre.lng.toFixed(5) +
+    ". Edges: west " + area.getWest().toFixed(5) + ", south " + area.getSouth().toFixed(5) +
+    ", east " + area.getEast().toFixed(5) + ", north " + area.getNorth().toFixed(5) + ".");
+
+  // --- Map: the after photo with the changes on top ---
+  heading("Map of changes");
+  const mapPicture = await changeMapPicture(result, widthMetres, heightMetres);
+  picture(mapPicture.dataUrl, mapPicture.width, mapPicture.height, width, 120);
+  paragraph("The after photo (" + niceDate(result.after.item.properties.datetime) + ") with the changes on top. " +
+    "North is up. The picture is " + (widthMetres / 1000).toFixed(1) + " km wide.", { grey: true, size: 9 });
+  // Legend: a coloured square for each kind of change
+  for (const kind of [PLANTS_GAINED, PLANTS_LOST, NEW_BUILT_OR_BARE, SKIPPED]) {
+    makeRoom(6);
+    const [r, g, b] = CHANGE_COLOURS[kind];
+    pdf.setFillColor(r, g, b).rect(left, y + 0.8, 3.5, 3.5, "F");
+    pdf.setFont("helvetica", "normal").setFontSize(10).setTextColor(0);
+    pdf.text(CHANGE_NAMES[kind] || "Skipped (cloud, shadow or missing data)", left + 6, y + 3.8);
+    y += 5.5;
+  }
+
+  // --- Images ---
+  heading("Satellite images");
+  paragraph("Before: " + describeImage(result.before) + " (" + result.before.item.id + ")");
+  paragraph("After: " + describeImage(result.after) + " (" + result.after.item.id + ")");
+  paragraph(result.sameView
+    ? "Both images were taken from the same satellite path, so buildings lean the same way in both."
+    : "The images were taken from different satellite paths, so tall buildings may lean differently " +
+      "and show false changes.");
+
+  // --- Summary table ---
+  heading("Changes found");
+  const columnsX = [left, left + 110, left + 150]; // name, size, percentage
+  pdf.setFont("helvetica", "bold").setFontSize(10).setTextColor(0);
+  pdf.text("Kind of change", columnsX[0], y + 4);
+  pdf.text("Size", columnsX[1] + 25, y + 4, { align: "right" });
+  pdf.text("Share", columnsX[2] + 25, y + 4, { align: "right" });
+  y += 6;
+  pdf.setDrawColor(200).line(left, y, left + width, y);
+  y += 1;
+  pdf.setFont("helvetica", "normal");
+  for (const kind of [PLANTS_GAINED, PLANTS_LOST, NEW_BUILT_OR_BARE]) {
+    pdf.text(CHANGE_NAMES[kind], columnsX[0], y + 4);
+    pdf.text(numbers[kind].size, columnsX[1] + 25, y + 4, { align: "right" });
+    pdf.text(numbers[kind].percent, columnsX[2] + 25, y + 4, { align: "right" });
+    y += 6;
+  }
+  y += 2;
+  paragraph(numbers.totalSentence);
+  paragraph("Skipped because of cloud, shadow or missing data: " + numbers.skipped + ".");
+  paragraph("Each 10 m square counts as 100 m². A hectare (ha) is 10,000 m²: a square 100 m long on each side.",
+    { grey: true, size: 9 });
+
+  // --- Time series (only if it has finished loading) ---
+  const chart = await seriesChartPicture();
+  if (chart) {
+    heading("Over time");
+    picture(chart.dataUrl, chart.width, chart.height, 150, 85);
+    for (const [colour, name] of [[NDVI_COLOUR, "Plant score (NDVI)"], [NDBI_COLOUR, "Built-up score (NDBI)"]]) {
+      makeRoom(6);
+      pdf.setDrawColor(colour).setLineWidth(0.8).line(left, y + 2.5, left + 6, y + 2.5).setLineWidth(0.2);
+      pdf.setFont("helvetica", "normal").setFontSize(10).setTextColor(0);
+      pdf.text(name, left + 8, y + 3.6);
+      y += 5.5;
+    }
+    paragraph("The average score over the area's clear, dry-land squares in " + series.length +
+      " clear images (at most " + SERIES_MAX_CLOUD + "% of the area hidden), about one every " +
+      SERIES_STEP_DAYS + " days, all from the same satellite path as the before image.", { grey: true, size: 9 });
+  }
+
+  // --- Method ---
+  heading("How the changes were found");
+  paragraph("Images: Sentinel-2 Level-2A images within " + SEARCH_WINDOW_DAYS + " days of each date were searched. " +
+    "For the " + IMAGES_TO_CHECK + " most promising near each date, the scene classification band was used to " +
+    "measure cloud, cloud shadow and missing data over the area itself. The pair with the least cloud, closest to " +
+    "the chosen dates and taken from the same satellite path, was used.");
+  paragraph("Scores: every 10 m square gets a plant score, NDVI = (near-infrared - red) / (near-infrared + red), " +
+    "from bands B08 and B04, and a built-up score, NDBI = (short-wave infrared - near-infrared) / " +
+    "(short-wave infrared + near-infrared), from bands B11 and B8A. Both go from -1 to +1.");
+  paragraph("Plants gained or lost: NDVI rose or fell by at least " + NDVI_THRESHOLD.toFixed(2) +
+    ", and the square had an NDVI of at least " + PLANTS_NDVI.toFixed(2) + " on the greener date.");
+  paragraph("New buildings or bare ground: NDBI rose by at least " + NDBI_THRESHOLD.toFixed(2) +
+    ", except where the ground was wet before (short-wave infrared reflectance below " + WET_SWIR.toFixed(2) +
+    ") or became much darker (less than " + Math.round(SHADOW_DARKENING * 100) + "% as bright, " +
+    "usually a new shadow).");
+  paragraph("Left out: squares hidden by cloud, shadow or missing data in either image (skipped), and water and " +
+    "shorelines. A changed square only counts if at least 2 of its 8 neighbours changed the same way.");
+
+  // --- Limits ---
+  heading("Limits");
+  bullet("Small things are missed. Sentinel-2's sharpest pixels are 10 m across, and a change needs a small " +
+    "patch of squares, so anything smaller than about 20 m won't show.");
+  bullet("Water change and land reclamation aren't detected, because shorelines are left out.");
+  bullet("Tall towers can cause a little false 'new buildings or bare ground' at their feet as shadows change " +
+    "with the seasons.");
+  bullet("Haze, the sun's angle and the season change the scores a little; the thresholds above ignore most " +
+    "of this, but not all.");
+  bullet("This is a quick guide, not a survey. Check the before and after photos before drawing conclusions.");
+
+  // --- Credits ---
+  heading("Data and credits");
+  const years = [...new Set([dayOf(result.before.item), dayOf(result.after.item)].map(function (day) {
+    return day.slice(0, 4);
+  }))].join(", ");
+  paragraph("Contains modified Copernicus Sentinel data " + years + ", processed by ESA. Copernicus Sentinel " +
+    "data is free to use under the Legal Notice on the use of Copernicus Sentinel Data.");
+  paragraph("Images found, read and cut out through Microsoft Planetary Computer " +
+    "(https://planetarycomputer.microsoft.com/).");
+  paragraph("Made with Leaflet, geotiff.js, proj4js and jsPDF.");
+
+  // Page numbers at the bottom of every page
+  const pages = pdf.getNumberOfPages();
+  for (let page = 1; page <= pages; page++) {
+    pdf.setPage(page);
+    pdf.setFont("helvetica", "normal").setFontSize(8).setTextColor(120);
+    pdf.text("Page " + page + " of " + pages, left + width, 290, { align: "right" });
+  }
+  return pdf;
+}
+
+// The after photo of just the area, with the change squares painted on top.
+// The photo is cut out by the Planetary Computer as a small PNG, using the
+// same colour settings as the map (photoSettings).
+async function changeMapPicture(result, widthMetres, heightMetres) {
+  // At most 1000 pixels on the longer side, keeping the area's shape
+  const scale = 1000 / Math.max(widthMetres, heightMetres);
+  const width = Math.max(1, Math.round(widthMetres * scale));
+  const height = Math.max(1, Math.round(heightMetres * scale));
+  const area = result.area;
+
+  const url =
+    CUTOUT_URL + [area.getWest(), area.getSouth(), area.getEast(), area.getNorth()].join(",") +
+    "/" + width + "x" + height + ".png" + photoSettings(result.after.item);
+  const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
+  if (!response.ok) throw new Error("The map picture failed with error " + response.status);
+  const photo = await createImageBitmap(await response.blob());
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "white";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(photo, 0, 0, width, height);
+  context.imageSmoothingEnabled = false; // keep the change squares sharp
+  context.drawImage(changesCanvas(result.grid, result.kinds), 0, 0, width, height);
+  return { dataUrl: canvas.toDataURL("image/jpeg", 0.9), width: width, height: height };
+}
+
+// The time series chart as a picture, or null if there isn't one yet.
+// The chart's colours and fonts come from style.css, which a picture made from
+// the SVG on its own wouldn't have, so they're copied onto each part first.
+async function seriesChartPicture() {
+  const svg = seriesChart.querySelector("svg");
+  if (!svg || series.length === 0) return null;
+
+  const copy = svg.cloneNode(true);
+  const originals = svg.querySelectorAll("*");
+  copy.querySelectorAll("*").forEach(function (part, i) {
+    const style = getComputedStyle(originals[i]);
+    for (const property of ["fill", "stroke", "stroke-width", "stroke-dasharray", "font-size", "font-family"]) {
+      part.style.setProperty(property, style.getPropertyValue(property));
+    }
+  });
+  copy.querySelectorAll(".hit, .frame-marker").forEach(function (part) { part.remove(); });
+
+  const size = svg.viewBox.baseVal;
+  const scale = 4; // sharp when printed
+  copy.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  copy.setAttribute("width", size.width * scale);
+  copy.setAttribute("height", size.height * scale);
+  const image = new Image();
+  image.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(copy));
+  await image.decode();
+
+  const canvas = document.createElement("canvas");
+  canvas.width = size.width * scale;
+  canvas.height = size.height * scale;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "white";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return { dataUrl: canvas.toDataURL("image/png"), width: canvas.width, height: canvas.height };
+}
+
 // --- The brightness slider ---
 const brightnessRow = document.getElementById("brightness-row");
 const brightnessSlider = document.getElementById("brightness-slider");
@@ -1394,6 +1881,8 @@ function clearComparison() {
   beforeLayer = null;
   afterLayer = null;
   changeLayer = null;
+  lastResult = null;
+  downloadStatus.textContent = "";
   beforeInfo.textContent = "-";
   afterInfo.textContent = "-";
   changeSection.hidden = true;

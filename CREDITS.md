@@ -16,6 +16,15 @@ Found and displayed through **[Microsoft Planetary Computer](https://planetaryco
 **[Leaflet](https://leafletjs.com/)** 1.9.4, the interactive map library.
 License: BSD 2-Clause. Loaded from unpkg.com.
 
+**[geotiff.js](https://geotiffjs.github.io/)** 3.0.5, reads the satellite image files.
+License: MIT. Loaded from jsDelivr.
+
+**[proj4js](https://github.com/proj4js/proj4js)** 2.15.0, converts map coordinates.
+License: MIT. Loaded from cdnjs.
+
+**[jsPDF](https://github.com/parallax/jsPDF)** 4.2.1, makes the PDF report in the browser.
+License: MIT. Loaded from cdnjs.
+
 ## Map pictures
 
 The background satellite imagery, street labels, place labels and the street map come from **Esri** (ArcGIS Online basemaps), used without an API key. The required credits are shown in the bottom-right corner of the map.

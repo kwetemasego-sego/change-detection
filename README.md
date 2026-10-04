@@ -31,6 +31,9 @@ It runs entirely in your web browser. There is no server and no API key: it is j
    - **Click a point** on the chart to show that photo on the map, with its date at the top.
    - **Press Play** for a timelapse of all the photos in date order. **Speed** sets how long each one stays on screen.
    - **Back to before/after**, or moving the swipe slider, returns to the before/after comparison.
+8. **Download** the results (made in your browser, nothing is uploaded):
+   - **Download report** saves a PDF: a map of the changes on the after photo, the two images' dates and cloud, the summary in hectares and percentages, the time series chart (if it has finished loading), how the changes were found, the limits and the data credits.
+   - **Download GeoJSON** saves the changed areas as map shapes for GIS software, or for viewing at [geojson.io](https://geojson.io/). Touching squares of the same kind of change are joined into one shape. Each shape has `change` (its kind), `area_ha`, `area_m2`, `squares`, and the two image dates, plus colours that geojson.io shows.
 
 Tips:
 
@@ -142,7 +145,7 @@ All the numbers above are settings at the top of [`main.js`](main.js), so they'r
 | Land cover | [OpenStreetMap](https://www.openstreetmap.org/) via the [Overpass API](https://overpass-api.de/) | No |
 | Wildlife records | [GBIF](https://www.gbif.org/) | No |
 
-Libraries: [Leaflet](https://leafletjs.com/) for the map, [geotiff.js](https://geotiffjs.github.io/) for reading the image files, and [proj4js](https://github.com/proj4js/proj4js) for converting map coordinates.
+Libraries: [Leaflet](https://leafletjs.com/) for the map, [geotiff.js](https://geotiffjs.github.io/) for reading the image files, [proj4js](https://github.com/proj4js/proj4js) for converting map coordinates, and [jsPDF](https://github.com/parallax/jsPDF) for the PDF report.
 
 Sentinel-2 images contain modified Copernicus Sentinel data. Licences and full credits are in [CREDITS.md](CREDITS.md).
 
@@ -179,7 +182,7 @@ Then open **http://localhost:8000** in your browser. Press **Ctrl+C** in the ter
 |---|---|
 | `index.html` | The page: map, control panel, slider and place details panel |
 | `style.css` | How everything looks |
-| `main.js` | All the code: map, choosing an area and dates, finding images, reading bands, change detection, time series and timelapse, swipe slider, place details |
+| `main.js` | All the code: map, choosing an area and dates, finding images, reading bands, change detection, time series and timelapse, downloads, swipe slider, place details |
 | `CREDITS.md` | Data sources, libraries and licences |
 | `docs/masdar-result.png` | The screenshot in this README |
 
