@@ -46,3 +46,10 @@ Sources: Esri, Maxar, Earthstar Geographics, HERE, Garmin, USGS, © OpenStreetMa
 | Soil type | [ISRIC SoilGrids](https://soilgrids.org/) | CC BY 4.0 |
 | Land cover | © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, via the Overpass API | [ODbL](https://opendatacommons.org/licenses/odbl/) |
 | Wildlife records | [GBIF.org](https://www.gbif.org/) | Records are CC0, CC BY or CC BY-NC, set by each dataset's publisher |
+
+## Place search
+
+The search box uses **[Nominatim](https://nominatim.org/)**, run by the OpenStreetMap Foundation, following its
+[usage policy](https://operations.osmfoundation.org/policies/nominatim/): searches only when you press Search,
+at most one a second, answers kept instead of asked for again, and the credit shown under the box.
+Place data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, [ODbL](https://opendatacommons.org/licenses/odbl/).

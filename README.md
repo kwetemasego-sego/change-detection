@@ -19,7 +19,8 @@ It runs entirely in your web browser. There is no server and no API key: it is j
 
 ## How to use it
 
-1. **Open the [live site](https://kwetemasego-sego.github.io/change-detection/)** and move the map to the place you're interested in.
+1. **Open the [live site](https://kwetemasego-sego.github.io/change-detection/)** and go to the place you're interested in: move the map, or type a place name in the search box and press **Search** (or Enter). If more than one place matches, they're listed below the box: click one to go there.
+   - Or press one of the **examples** (*Khalifa City: white fill*, *Lulu Island: earthworks*, *Al Mushrif: seasonal greening*). Each one sets an area and dates from the [validation tests](VALIDATION.md) and finds the images straight away.
 2. **Choose an area**:
    - Press **Draw area**, then press and drag a box on the map, *or*
    - Press **Use visible area** to use everything on screen (easiest on phones).
@@ -38,6 +39,16 @@ It runs entirely in your web browser. There is no server and no API key: it is j
 8. **Download** the results (made in your browser, nothing is uploaded):
    - **Download report** saves a PDF: a map of the changes on the after photo, the two images' dates and cloud, the summary in hectares and percentages (with how much was bright new surface), the seasonal warning and the year-apart check if they apply, the time series chart (if it has finished loading), how the changes were found, the limits and the data credits.
    - **Download GeoJSON** saves the changed areas as map shapes for GIS software, or for viewing at [geojson.io](https://geojson.io/). Touching squares of the same kind of change are joined into one shape. Each shape has `change` (its kind), `area_ha`, `area_m2`, `squares`, and the two image dates, plus colours that geojson.io shows.
+
+### Sharing a search
+
+Press **Copy link** (next to **Find images**) to copy a web address with your area and dates in it. Anyone who opens it sees the same area and dates, and the search runs by itself. The address in your browser's address bar also updates each time you press **Find images**, so you can bookmark it too. A link looks like this:
+
+```
+https://kwetemasego-sego.github.io/change-detection/?area=24.38120,54.54020,24.39920,54.56000&before=2026-07-03&after=2026-10-01
+```
+
+`area` is the box's south, west, north and east edges (latitude and longitude), and `before` and `after` are the dates. If a link's area or dates don't make sense (say the before date is later than the after date), the page says so and waits for you to choose.
 
 Tips:
 
@@ -185,6 +196,7 @@ All the numbers above are settings at the top of [`main.js`](main.js), so they'r
 | Soil type | [ISRIC SoilGrids](https://soilgrids.org/) | No |
 | Land cover | [OpenStreetMap](https://www.openstreetmap.org/) via the [Overpass API](https://overpass-api.de/) | No |
 | Wildlife records | [GBIF](https://www.gbif.org/) | No |
+| Place search | [Nominatim](https://nominatim.org/), with © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors' data. Following its [usage policy](https://operations.osmfoundation.org/policies/nominatim/): it only searches when you press Search, never more than once a second, keeps answers instead of asking twice, and shows its credit | No |
 
 Libraries: [Leaflet](https://leafletjs.com/) for the map, [geotiff.js](https://geotiffjs.github.io/) for reading the image files, [proj4js](https://github.com/proj4js/proj4js) for converting map coordinates, and [jsPDF](https://github.com/parallax/jsPDF) for the PDF report.
 
@@ -203,7 +215,7 @@ Sentinel-2 images contain modified Copernicus Sentinel data. Licences and full c
 - **Areas up to 10 km × 10 km** for change detection. Larger areas would download too much data into the browser.
 - **The cloud check only uses the 6 most promising photos** near each date. If they are all cloudy over your area, try other dates.
 - **The time series is an average over the whole area**, so a building site that covers a small part of it only moves the lines a little. Draw the area tightly around the place you're interested in.
-- **It depends on free public services.** If Planetary Computer, Open-Meteo, SoilGrids, Overpass or GBIF are busy or down, that part shows a message or "Not available" while the rest keeps working. Planetary Computer's tile service is meant for exploring data and limits how many requests it accepts.
+- **It depends on free public services.** If Planetary Computer, Open-Meteo, SoilGrids, Overpass, GBIF or Nominatim are busy or down, that part shows a message or "Not available" while the rest keeps working. Planetary Computer's tile service is meant for exploring data and limits how many requests it accepts.
 - **It's a quick visual guide, not a survey.** Always check the before and after photos with the slider before drawing conclusions.
 
 ---
@@ -232,8 +244,8 @@ Then:
 
 | Command | What it checks | Time | Needs the internet? |
 |---|---|---|---|
-| `npm run test:quick` | The page loads, and the change rules give the right answers on made-up data: white fill is found, small bright patches and cleaned solar panels aren't, seasons are worked out, the summary adds up | About 5 seconds | Only for the map libraries |
-| `npm test` | The quick tests, plus one real site (Khalifa City south) run like a user would: real Sentinel-2 images, the white plot found, the seasonal warning and the year-apart check | About 20 to 40 seconds | Yes |
+| `npm run test:quick` | The page loads, and the change rules give the right answers on made-up data: white fill is found, small bright patches and cleaned solar panels aren't, seasons are worked out, the summary adds up. Also shared links (made, read back, bad ones refused, opening one starts the search), **Copy link**, the examples, and the place search's rules (only on Search, at most once a second, answers kept, credit shown), using made-up place search answers | About 15 seconds | Only for the map libraries |
+| `npm test` | The quick tests, plus one real site (Khalifa City south) run like a user would: real Sentinel-2 images, the white plot found, the seasonal warning and the year-apart check, and the same site opened from a shared link | About 30 to 60 seconds | Yes |
 | `npm run test:validation` | All eight sites from [VALIDATION.md](VALIDATION.md), each checked against what a good result looks like. The numbers are saved in `test-output/validation.json` | About 2 to 5 minutes | Yes |
 
 Each test prints ✔ when it passes and ✖ with the reason when it fails. Riyadh City is marked as a known miss ("TODO"): it is reported but doesn't make the run fail.
@@ -261,7 +273,7 @@ A **release** is a named snapshot of the project at a moment when it worked, lik
 | `VALIDATION.md` | Test results on eight sites, before and after the latest rule changes |
 | `docs/validation/` | Before, after and result pictures for each test site |
 | `docs/screenshot.jpg` | The screenshot at the top of this README |
-| `tests/` | The browser tests: `unit.test.js` (quick, made-up data), `smoke.test.js` (one real site), `validation.js` (all eight sites), `sites.js` (the sites and how to run one) and `helpers.js` (starts a web server and headless Chrome) |
+| `tests/` | The browser tests: `unit.test.js` (quick, made-up data), `sharing.test.js` (links, place search and examples, with made-up place search answers), `smoke.test.js` (one real site), `validation.js` (all eight sites), `sites.js` (the sites and how to run one) and `helpers.js` (starts a web server and headless Chrome) |
 | `package.json`, `package-lock.json` | The test tool (Puppeteer) and the test commands. The site itself doesn't need them |
 | `.github/workflows/` | Instructions for GitHub Actions: the tests on every push, and the weekly validation |
 

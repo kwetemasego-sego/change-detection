@@ -31,6 +31,21 @@
 
     <div class="step">
       <strong>1. Area</strong>
+      <!-- Find a place by name (OpenStreetMap's Nominatim) -->
+      <form id="place-search" class="place-search">
+        <input id="place-input" type="search" placeholder="Find a place, e.g. Masdar City" aria-label="Find a place" autocomplete="off">
+        <button id="place-search-button" type="submit">Search</button>
+      </form>
+      <div id="place-search-status" class="small"></div>
+      <ul id="place-results" class="place-results" hidden></ul>
+      <div class="small credit-line">
+        Search by <a href="https://nominatim.org/" target="_blank" rel="noopener">Nominatim</a>,
+        data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors
+      </div>
+      <!-- One-click examples: an area and dates that show the tool well -->
+      <div class="small examples-label">Or try an example:</div>
+      <div id="examples" class="buttons examples"></div>
+      <div class="small">Or mark an area on the map:</div>
       <div class="buttons">
         <button id="draw-button" type="button">Draw area</button>
         <button id="use-view-button" type="button">Use visible area</button>
@@ -46,7 +61,9 @@
       </div>
       <div class="buttons">
         <button id="find-button" type="button">Find images</button>
+        <button id="copy-link-button" type="button" disabled>Copy link</button>
       </div>
+      <div id="copy-link-status" class="small"></div>
     </div>
 
     <div class="step">

@@ -216,6 +216,8 @@ function setArea(box) {
   chosenArea = box;
   areaBox.setBounds(box).addTo(map);
   clearComparison(); // images for an old area no longer apply
+  copyLinkButton.disabled = false;
+  copyLinkStatus.textContent = "";
 
   const centre = box.getCenter();
   const widthKm = map.distance(box.getSouthWest(), box.getSouthEast()) / 1000;
@@ -246,6 +248,177 @@ afterDateInput.value = toDateText(today);
 beforeDateInput.value = toDateText(new Date(today.getTime() - DEFAULT_GAP_DAYS * 24 * 60 * 60 * 1000));
 afterDateInput.max = toDateText(today); // no images from the future!
 beforeDateInput.max = toDateText(today);
+
+// =====================================================
+// 3b. Finding a place, examples, and links to share
+// =====================================================
+
+// --- Finding a place by name ---
+// Nominatim is OpenStreetMap's free place search. Its rules: at most one search
+// a second, no searching while someone is still typing (only when they press
+// Search), keep answers instead of asking twice, and show its credit (in the panel).
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+const NOMINATIM_GAP_MS = 1000; // at least 1 second between searches
+const placeForm = document.getElementById("place-search");
+const placeInput = document.getElementById("place-input");
+const placeSearchButton = document.getElementById("place-search-button");
+const placeSearchStatus = document.getElementById("place-search-status");
+const placeResults = document.getElementById("place-results");
+const placeAnswers = new Map(); // answers already received, by search text
+let lastPlaceSearchTime = 0;
+
+placeForm.addEventListener("submit", async function (event) {
+  event.preventDefault(); // stay on the page instead of sending the form
+  const query = placeInput.value.trim();
+  if (query.length < 2 || placeSearchButton.disabled) return;
+  placeSearchButton.disabled = true;
+  placeSearchStatus.textContent = "Searching…";
+  try {
+    const key = query.toLowerCase();
+    let places = placeAnswers.get(key);
+    if (!places) {
+      const wait = lastPlaceSearchTime + NOMINATIM_GAP_MS - Date.now();
+      if (wait > 0) await new Promise(function (resolve) { setTimeout(resolve, wait); });
+      lastPlaceSearchTime = Date.now();
+      places = await fetchJson(NOMINATIM_URL + "?format=jsonv2&limit=5&q=" + encodeURIComponent(query));
+      placeAnswers.set(key, places);
+    }
+    showPlaces(query, places);
+  } catch (error) {
+    console.warn("Place search failed:", error);
+    placeSearchStatus.textContent = "Sorry, the place search isn't working right now. Please try again in a moment.";
+  } finally {
+    placeSearchButton.disabled = false;
+  }
+});
+
+// Lists the places found as buttons, and moves the map to the first one
+function showPlaces(query, places) {
+  placeResults.replaceChildren();
+  placeResults.hidden = places.length < 2;
+  if (places.length === 0) {
+    placeSearchStatus.textContent = "No places found for “" + query + "”.";
+    return;
+  }
+  for (const place of places) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = place.display_name;
+    button.addEventListener("click", function () { goToPlace(place); });
+    const item = document.createElement("li");
+    item.append(button);
+    placeResults.append(item);
+  }
+  goToPlace(places[0]);
+}
+
+function goToPlace(place) {
+  // boundingbox is [south, north, west, east], as text
+  const [south, north, west, east] = place.boundingbox.map(Number);
+  map.fitBounds([[south, west], [north, east]], { maxZoom: 16 });
+  placeSearchStatus.textContent =
+    "Showing " + place.display_name.split(",")[0] + ". Now press Draw area or Use visible area.";
+}
+
+// --- One-click examples ---
+// Areas and dates from the tests in VALIDATION.md that show the tool well.
+// Each area is about 2 km across.
+const EXAMPLES = [
+  { name: "Khalifa City: white fill", lat: 24.3902, lng: 54.5501, before: "2026-07-03", after: "2026-10-01" },
+  { name: "Lulu Island: earthworks", lat: 24.4943, lng: 54.3450, before: "2026-07-03", after: "2026-10-01" },
+  { name: "Al Mushrif: seasonal greening", lat: 24.4560, lng: 54.3860, before: "2026-07-03", after: "2026-10-01" }
+];
+
+for (const example of EXAMPLES) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = example.name;
+  button.addEventListener("click", function () {
+    const box = L.latLngBounds(
+      [example.lat - 0.009, example.lng - 0.0099],
+      [example.lat + 0.009, example.lng + 0.0099]
+    );
+    runSearch(box, example.before, example.after);
+  });
+  document.getElementById("examples").append(button);
+}
+
+// Chooses an area and dates, shows them, and presses Find images
+function runSearch(box, before, after) {
+  if (findButton.disabled) {
+    statusText.textContent = "Please wait for the current search to finish.";
+    return;
+  }
+  setArea(box);
+  beforeDateInput.value = before;
+  afterDateInput.value = after;
+  map.fitBounds(box);
+  findButton.click();
+}
+
+// --- Links to share ---
+// The area and dates are kept in the web address, e.g.
+//   ...?area=24.38120,54.54020,24.39920,54.56000&before=2026-07-03&after=2026-10-01
+// (area = south, west, north, east). Opening such a link shows the same search.
+const copyLinkButton = document.getElementById("copy-link-button");
+const copyLinkStatus = document.getElementById("copy-link-status");
+
+function shareLink(box, before, after) {
+  const edges = [box.getSouth(), box.getWest(), box.getNorth(), box.getEast()];
+  return location.origin + location.pathname +
+    "?area=" + edges.map(function (n) { return n.toFixed(5); }).join(",") +
+    "&before=" + before + "&after=" + after;
+}
+
+// Reads the area and dates from the web address. Returns null if there are
+// none, or { error } if they don't make sense.
+function readSharedSearch(search) {
+  const parameters = new URLSearchParams(search);
+  if (!parameters.has("area")) return null;
+  const edges = parameters.get("area").split(",").map(Number);
+  const [south, west, north, east] = edges;
+  const before = parameters.get("before") || "";
+  const after = parameters.get("after") || "";
+  const isDate = function (text) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(text) && !isNaN(new Date(text + "T00:00:00Z"));
+  };
+  if (edges.length !== 4 || !edges.every(Number.isFinite) ||
+      south < -90 || north > 90 || west < -180 || east > 180 || south >= north || west >= east) {
+    return { error: "The link's area isn't valid." };
+  }
+  if (!isDate(before) || !isDate(after) || before >= after || after > toDateText(new Date())) {
+    return { error: "The link's dates aren't valid: the before date must be earlier than the after date, and not in the future." };
+  }
+  return { box: L.latLngBounds([south, west], [north, east]), before: before, after: after };
+}
+
+// Opens the search in the web address, if there is one (called at the end of this file)
+function openSharedLink() {
+  const shared = readSharedSearch(location.search);
+  if (!shared) return;
+  if (shared.error) {
+    statusText.textContent = shared.error + " Choose an area and dates instead.";
+    return;
+  }
+  runSearch(shared.box, shared.before, shared.after);
+}
+
+copyLinkButton.addEventListener("click", async function () {
+  if (!chosenArea) return;
+  const link = shareLink(chosenArea, beforeDateInput.value, afterDateInput.value);
+  try {
+    await navigator.clipboard.writeText(link);
+    copyLinkStatus.textContent = "Link copied. Anyone who opens it sees this area and these dates.";
+  } catch (error) {
+    // Some browsers don't allow copying: show the link, selected, to copy by hand
+    copyLinkStatus.textContent = "Copy this link: ";
+    const box = document.createElement("input");
+    box.readOnly = true;
+    box.value = link;
+    copyLinkStatus.append(box);
+    box.select();
+  }
+});
 
 // =====================================================
 // 4. Finding the clearest Sentinel-2 image near a date
@@ -937,7 +1110,7 @@ let changeLayer = null; // the coloured change layer (null = none)
 
 findButton.addEventListener("click", async function () {
   if (!chosenArea) {
-    statusText.textContent = "First choose an area: press Draw area or Use visible area.";
+    statusText.textContent = "First choose an area: find a place, try an example, or press Draw area or Use visible area.";
     return;
   }
   if (beforeDateInput.value >= afterDateInput.value) {
@@ -945,6 +1118,8 @@ findButton.addEventListener("click", async function () {
     return;
   }
 
+  // Keep this search in the web address, so it can be shared or bookmarked (section 3b)
+  history.replaceState(null, "", shareLink(chosenArea, beforeDateInput.value, afterDateInput.value));
   clearComparison();
   findButton.disabled = true;
   statusText.textContent = "Searching for Sentinel-2 images and checking clouds over your area…";
@@ -2572,3 +2747,10 @@ function showMyLocation(position) {
 function showLocationError(error) {
   locateStatusText.textContent = "Couldn't get your location: " + error.message;
 }
+
+// =====================================================
+// 8. Opening a shared link
+// =====================================================
+// Last, once everything above is ready: if the web address holds an area and
+// dates (section 3b), show them and run the search.
+openSharedLink();

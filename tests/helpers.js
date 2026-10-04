@@ -46,7 +46,7 @@ async function openSite() {
     await browser.close();
     server.close();
   }
-  return { page: page, pageErrors: pageErrors, close: close };
+  return { page: page, pageErrors: pageErrors, close: close, url: url, browser: browser };
 }
 
 module.exports = { openSite };

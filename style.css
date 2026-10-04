@@ -69,8 +69,57 @@ body {
 
 /* Links in the panels (the README and the credits) */
 .hint a,
-.credits a {
+.credits a,
+.credit-line a {
   color: #1a5fb4;
+}
+
+/* --- Finding a place by name --- */
+.place-search {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 2px;
+}
+
+.place-search input {
+  flex: 1;
+  min-width: 0; /* lets the box shrink on narrow screens */
+  font: inherit;
+  padding: 3px 6px;
+}
+
+/* The list of places found: each one is a button */
+.place-results {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+}
+
+.place-results button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 3px 6px;
+  margin-bottom: 3px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.credit-line {
+  font-size: 11px;
+  color: #666;
+}
+
+.examples-label {
+  margin-top: 6px;
+}
+
+/* The "Copy link" fallback: the link in a box, ready to select */
+#copy-link-status input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
 }
 
 .status {
@@ -384,9 +433,19 @@ details p {
 }
 
 /* On narrow screens (phones), keep the slider above the place details panel */
+/* The [hidden] attribute must win over "display: flex" above */
+#swipe-bar[hidden] {
+  display: none;
+}
+
 @media (max-width: 760px) {
   #place-panel {
     max-height: 30vh;
+  }
+
+  /* Stop above the place details panel (it scrolls inside instead) */
+  #info-panel {
+    max-height: calc(100% - 30vh - 44px);
   }
 
   #swipe-bar {
