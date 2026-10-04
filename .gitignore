@@ -24,3 +24,6 @@ build/
 # Logs and temporary files
 *.log
 *.tmp
+
+# Test results (made by npm run test:validation)
+test-output/

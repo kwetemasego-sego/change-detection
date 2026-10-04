@@ -1,5 +1,8 @@
 # Satellite Change Viewer
 
+[![Tests](https://github.com/kwetemasego-sego/change-detection/actions/workflows/tests.yml/badge.svg)](https://github.com/kwetemasego-sego/change-detection/actions/workflows/tests.yml)
+[![Latest release](https://img.shields.io/github/v/release/kwetemasego-sego/change-detection)](https://github.com/kwetemasego-sego/change-detection/releases/latest)
+
 See what changed in a place over a few months, using free Sentinel-2 satellite images.
 
 Draw an area on the map and pick two dates. The tool finds the clearest satellite photo near each date, lets you swipe between them, and colours in what changed: plants that grew or disappeared, and new buildings or bare ground.
@@ -217,6 +220,36 @@ python -m http.server 8000
 
 Then open **http://localhost:8000** in your browser. Press **Ctrl+C** in the terminal to stop the server. **Locate me** only works on `localhost` or `https://` pages.
 
+## Running the tests
+
+The tests open the site in **headless Chrome** (Chrome without a window) and check that it works. You need [Node.js](https://nodejs.org/) 22 or newer. The first time, install the test tool, [Puppeteer](https://pptr.dev/), which also downloads its own copy of Chrome (about 150 MB):
+
+```
+npm install
+```
+
+Then:
+
+| Command | What it checks | Time | Needs the internet? |
+|---|---|---|---|
+| `npm run test:quick` | The page loads, and the change rules give the right answers on made-up data: white fill is found, small bright patches and cleaned solar panels aren't, seasons are worked out, the summary adds up | About 5 seconds | Only for the map libraries |
+| `npm test` | The quick tests, plus one real site (Khalifa City south) run like a user would: real Sentinel-2 images, the white plot found, the seasonal warning and the year-apart check | About 20 seconds to 2 minutes | Yes |
+| `npm run test:validation` | All eight sites from [VALIDATION.md](VALIDATION.md), each checked against what a good result looks like. The numbers are saved in `test-output/validation.json` | About 3 to 10 minutes | Yes |
+
+Each test prints ✔ when it passes and ✖ with the reason when it fails. Riyadh City is marked as a known miss ("TODO"): it is reported but doesn't make the run fail.
+
+The real-image tests depend on Microsoft Planetary Computer. If it is busy or down they can fail even though nothing is wrong with the code; they try each site 3 times first.
+
+### Automatic tests on GitHub
+
+**GitHub Actions** is GitHub's robot helper. Each time code is pushed to GitHub, it borrows a fresh computer, downloads the project, installs everything and runs `npm test`. The result shows as a green ✔ or red ✖ next to each commit, and in the **Tests** badge at the top of this page. If a change breaks something, you find out straight away instead of a visitor finding it on the live site. The instructions it follows are in [`.github/workflows/tests.yml`](.github/workflows/tests.yml).
+
+The full validation is too slow for every push, so [`.github/workflows/validation.yml`](.github/workflows/validation.yml) runs it every Monday. You can also start it yourself: open the **Actions** tab, choose **Validation**, then **Run workflow**. Its numbers can be downloaded from the run's page.
+
+### Releases
+
+A **release** is a named snapshot of the project at a moment when it worked, like "version 1.0", with a short note saying what's in it. It is marked by a **tag**, a label stuck on one commit. You can always go back to it, download it as a zip, or compare later versions with it. Releases are listed on the [Releases page](https://github.com/kwetemasego-sego/change-detection/releases).
+
 ### Files
 
 | File | What it does |
@@ -228,5 +261,8 @@ Then open **http://localhost:8000** in your browser. Press **Ctrl+C** in the ter
 | `VALIDATION.md` | Test results on eight sites, before and after the latest rule changes |
 | `docs/validation/` | Before, after and result pictures for each test site |
 | `docs/masdar-result.png` | The screenshot in this README |
+| `tests/` | The browser tests: `unit.test.js` (quick, made-up data), `smoke.test.js` (one real site), `validation.js` (all eight sites), `sites.js` (the sites and how to run one) and `helpers.js` (starts a web server and headless Chrome) |
+| `package.json`, `package-lock.json` | The test tool (Puppeteer) and the test commands. The site itself doesn't need them |
+| `.github/workflows/` | Instructions for GitHub Actions: the tests on every push, and the weekly validation |
 
 The project started as a browser game. That version is kept on the [`game-version`](https://github.com/kwetemasego-sego/change-detection/tree/game-version) branch.

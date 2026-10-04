@@ -1,0 +1,29 @@
+# Runs the tests on GitHub's computers every time code is pushed.
+# The result shows as a green tick or red cross next to each commit, and in the
+# "Tests" badge in the README.
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch: # also lets you start it by hand from the Actions tab
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v5
+
+      - name: Install Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Puppeteer and its Chrome
+        run: npm ci
+
+      - name: Run the tests
+        run: npm test
