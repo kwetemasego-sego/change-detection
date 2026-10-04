@@ -169,9 +169,23 @@ body {
   align-items: center;
 }
 
-.legend b {
-  margin-left: auto; /* pushes the percentage to the right-hand side */
-  padding-left: 8px;
+/* The change summary: colour and name on the left, then the size and the
+   percentage in two columns on the right, lined up from row to row */
+.change-legend li {
+  display: grid;
+  grid-template-columns: auto 1fr 4.6em 3.2em;
+  align-items: center;
+}
+
+.change-legend b,
+.change-legend .pct {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.change-legend .pct {
+  font-size: 12px;
+  color: #555;
 }
 
 /* The little coloured squares, matching the colours in main.js (CHANGE_COLOURS) */

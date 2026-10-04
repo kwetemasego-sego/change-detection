@@ -47,7 +47,7 @@ Tips:
 | 🟦 Blue | New buildings or bare ground (land cleared, dug up or built on) |
 | Grey | Skipped: hidden by cloud, cloud shadow or missing data in one of the photos |
 
-The summary gives each kind as a percentage of the squares that could be compared, and says how many squares were skipped.
+The summary gives each kind as a size on the ground and as a percentage of the squares that could be compared, and says how much was skipped. Each 10 m square counts as 100 m². Sizes are in square metres (m²) for small amounts and hectares (ha) for larger ones: a hectare is 10,000 m², a square 100 m long on each side. The total size of the chosen area is shown under **Area**.
 
 ---
 

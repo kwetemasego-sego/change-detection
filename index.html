@@ -61,15 +61,19 @@
     <!-- Results of the change detection. "hidden" until there are results. -->
     <div class="step" id="change-section" hidden>
       <strong>3. Changes found</strong>
-      <ul class="legend">
-        <li><span class="swatch gained"></span>Plants gained <b id="pct-gained"></b></li>
-        <li><span class="swatch lost"></span>Plants lost <b id="pct-lost"></b></li>
-        <li><span class="swatch built"></span>New buildings or bare ground <b id="pct-built"></b></li>
+      <!-- Each kind of change: its colour, name, size on the ground, and share of the area -->
+      <ul class="legend change-legend">
+        <li><span class="swatch gained"></span><span>Plants gained</span><b id="size-gained"></b><span id="pct-gained" class="pct"></span></li>
+        <li><span class="swatch lost"></span><span>Plants lost</span><b id="size-lost"></b><span id="pct-lost" class="pct"></span></li>
+        <li><span class="swatch built"></span><span>New buildings or bare ground</span><b id="size-built"></b><span id="pct-built" class="pct"></span></li>
       </ul>
       <div id="change-total"></div>
       <div class="small">
         <span class="swatch skipped"></span>Skipped because of cloud, shadow or missing data:
         <span id="pct-skipped"></span>
+      </div>
+      <div class="small">
+        A hectare (ha) is 10,000 m²: a square 100 m long on each side, a bit bigger than a football pitch.
       </div>
       <div class="buttons">
         <button id="change-toggle" type="button">Hide changes</button>

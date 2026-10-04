@@ -38,6 +38,7 @@ const WET_SWIR = 0.15; // ground this dark in short-wave infrared before was wet
 const SHADOW_DARKENING = 0.6; // ground that became this much darker (less than 60%) is usually in a new, longer shadow
 const CHANGE_PIXEL_METRES = 10; // size of each compared square (Sentinel-2's sharpest bands are 10 m)
 const MAX_CHANGE_AREA_KM = 10; // larger areas would download too much, so changes aren't calculated
+const SQUARE_AREA_M2 = CHANGE_PIXEL_METRES * CHANGE_PIXEL_METRES; // each compared square counts as 100 m²
 
 // --- Showing the photos ---
 // Black always means "no light reflected". How bright counts as white is chosen
@@ -207,7 +208,8 @@ function setArea(box) {
   const widthKm = map.distance(box.getSouthWest(), box.getSouthEast()) / 1000;
   const heightKm = map.distance(box.getSouthWest(), box.getNorthWest()) / 1000;
   areaText.textContent =
-    widthKm.toFixed(1) + " km × " + heightKm.toFixed(1) + " km, centre " +
+    widthKm.toFixed(1) + " km × " + heightKm.toFixed(1) + " km (" +
+    formatArea(widthKm * 1000 * heightKm * 1000) + "), centre " +
     centre.lat.toFixed(5) + ", " + centre.lng.toFixed(5);
   statusText.textContent = "Now choose two dates and press Find images.";
 
@@ -683,24 +685,45 @@ function drawChanges(grid, kinds) {
   });
 }
 
-// Writes the percentages into the panel
+// Writes the sizes and percentages into the panel
 function showSummary(counts, totalSquares) {
   const compared = totalSquares - counts[SKIPPED];
   function percentOfCompared(count) {
-    return compared > 0 ? ((100 * count) / compared).toFixed(1) + "%" : "-";
+    if (compared === 0) return "-";
+    const percent = (100 * count) / compared;
+    return count > 0 && percent < 0.05 ? "<0.1%" : percent.toFixed(1) + "%"; // some change, but under 0.05%
+  }
+  // How much ground a number of squares covers, e.g. "1,600 m²" or "2.3 ha"
+  function sizeOf(count) {
+    return formatArea(count * SQUARE_AREA_M2);
   }
   const changed = counts[PLANTS_GAINED] + counts[PLANTS_LOST] + counts[NEW_BUILT_OR_BARE];
 
+  document.getElementById("size-gained").textContent = sizeOf(counts[PLANTS_GAINED]);
+  document.getElementById("size-lost").textContent = sizeOf(counts[PLANTS_LOST]);
+  document.getElementById("size-built").textContent = sizeOf(counts[NEW_BUILT_OR_BARE]);
   document.getElementById("pct-gained").textContent = percentOfCompared(counts[PLANTS_GAINED]);
   document.getElementById("pct-lost").textContent = percentOfCompared(counts[PLANTS_LOST]);
   document.getElementById("pct-built").textContent = percentOfCompared(counts[NEW_BUILT_OR_BARE]);
   document.getElementById("change-total").textContent =
-    "Changed: " + percentOfCompared(changed) + " of the " + compared.toLocaleString() +
-    " squares that could be compared.";
+    "Changed: " + sizeOf(changed) + " (" + percentOfCompared(changed) + ") of the " + sizeOf(compared) +
+    " (" + compared.toLocaleString() + " squares) that could be compared.";
   document.getElementById("pct-skipped").textContent =
-    counts[SKIPPED].toLocaleString() + " squares (" +
-    ((100 * counts[SKIPPED]) / totalSquares).toFixed(1) + "% of the area)";
+    sizeOf(counts[SKIPPED]) + " (" + ((100 * counts[SKIPPED]) / totalSquares).toFixed(1) + "% of the area)";
   changeSection.hidden = false;
+}
+
+// Writes an area in square metres for small amounts and hectares for larger ones
+// (1 hectare = 10,000 m²), e.g. 800 → "800 m²", 23,000 → "2.3 ha", 4,040,000 → "404 ha"
+function formatArea(squareMetres) {
+  if (squareMetres < 10000) {
+    return Math.round(squareMetres).toLocaleString("en-GB") + " m²";
+  }
+  const hectares = squareMetres / 10000;
+  if (hectares < 99.95) { // (99.95 and up would round to "100.0")
+    return hectares.toFixed(1) + " ha";
+  }
+  return Math.round(hectares).toLocaleString("en-GB") + " ha";
 }
 
 // =====================================================
