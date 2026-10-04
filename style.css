@@ -1,0 +1,13 @@
+/* Remove the browser's default white border around the page */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+/* Make the map fill the whole browser window */
+#map {
+  width: 100%;
+  height: 100%;
+}
