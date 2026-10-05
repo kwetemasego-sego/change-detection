@@ -22,7 +22,7 @@ test("the page loads without errors and starts with no results", async function 
       status: document.getElementById("status-text").textContent
     };
   });
-  assert.equal(state.title, "Satellite Change Viewer");
+  assert.equal(state.title, "TerraShift: See how the land changes");
   assert.equal(state.changesHidden, true);
   assert.equal(state.seasonHidden, true);
   assert.equal(state.status, "Start by choosing an area.");

@@ -2266,10 +2266,11 @@ async function makeReport(result) {
 
   // --- Title and area ---
   pdf.setFont("helvetica", "bold").setFontSize(18);
-  pdf.text("Satellite change report", left, y + 7);
+  pdf.text("TerraShift change report", left, y + 7);
   y += 11;
-  paragraph("Made on " + niceDate(new Date().toISOString()) + " with Satellite Change Viewer " +
-    "(https://kwetemasego-sego.github.io/change-detection/).", { grey: true, size: 9 });
+  paragraph("See how the land changes", { grey: true, size: 10 });
+  paragraph("Made on " + niceDate(new Date().toISOString()) + " with TerraShift " +
+    "(https://kwetemasego-sego.github.io/terrashift/).", { grey: true, size: 9 });
   paragraph("Area: " + (widthMetres / 1000).toFixed(1) + " km × " + (heightMetres / 1000).toFixed(1) + " km (" +
     formatArea(widthMetres * heightMetres) + "), centre " + centre.lat.toFixed(5) + ", " + centre.lng.toFixed(5) +
     ". Edges: west " + area.getWest().toFixed(5) + ", south " + area.getSouth().toFixed(5) +

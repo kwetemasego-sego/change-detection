@@ -1,5 +1,5 @@
 {
-  "name": "change-detection",
+  "name": "terrashift",
   "version": "1.0.0",
   "description": "See what changed in a place using free Sentinel-2 satellite images, in the browser.",
   "private": true,

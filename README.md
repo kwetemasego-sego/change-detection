@@ -1,17 +1,19 @@
-# Satellite Change Viewer
+# TerraShift
 
-[![Tests](https://github.com/kwetemasego-sego/change-detection/actions/workflows/tests.yml/badge.svg)](https://github.com/kwetemasego-sego/change-detection/actions/workflows/tests.yml)
-[![Latest release](https://img.shields.io/github/v/release/kwetemasego-sego/change-detection)](https://github.com/kwetemasego-sego/change-detection/releases/latest)
+[![Tests](https://github.com/kwetemasego-sego/terrashift/actions/workflows/tests.yml/badge.svg)](https://github.com/kwetemasego-sego/terrashift/actions/workflows/tests.yml)
+[![Latest release](https://img.shields.io/github/v/release/kwetemasego-sego/terrashift)](https://github.com/kwetemasego-sego/terrashift/releases/latest)
 
-See what changed in a place over a few months, using free Sentinel-2 satellite images, and what its terrain is like.
+**See how the land changes.**
+
+TerraShift shows what changed in a place over a few months, using free Sentinel-2 satellite images, and what its terrain is like.
 
 Draw an area on the map, or click a spot, and pick two dates. The tool finds the clearest satellite photo near each date, lets you swipe between them, and colours in what changed: plants that grew or disappeared, new buildings or bare ground, and burned land. It warns when plant changes may just be the seasons, and can check them against a year earlier. For the same area it also works out the terrain from a 30 m elevation model: how high, how steep, which way slopes face, how much is low-lying, a hillshade and an elevation profile.
 
-**Live site: https://kwetemasego-sego.github.io/change-detection/**
+**Live site: https://kwetemasego-sego.github.io/terrashift/**
 
 It runs entirely in your web browser. There is no server and no API key: it is just HTML, CSS and JavaScript, hosted on GitHub Pages.
 
-![The Satellite Change Viewer on Khalifa City south, Abu Dhabi, between 1 July and 29 September 2026: blue squares around a plot covered in white fill, green on a planted strip, and the seasonal warning in the panel.](docs/screenshot.jpg)
+![TerraShift on Khalifa City south, Abu Dhabi, between 1 July and 29 September 2026: blue squares around a plot covered in white fill, green on a planted strip, and the seasonal warning in the panel.](docs/screenshot.jpg)
 
 *Khalifa City south, Abu Dhabi, between 1 July and 29 September 2026. Blue marks a plot newly covered in white fill (found as a bright new surface) and green a planted strip that grew. The two photos are from summer and autumn, so the panel warns that some plant change may be seasonal; compared with a year earlier, 82% of it probably is.*
 
@@ -19,7 +21,7 @@ It runs entirely in your web browser. There is no server and no API key: it is j
 
 ## How to use it
 
-1. **Open the [live site](https://kwetemasego-sego.github.io/change-detection/)** and go to the place you're interested in: move the map, or type a place name in the search box and press **Search** (or Enter). If more than one place matches, they're listed below the box: click one to go there.
+1. **Open the [live site](https://kwetemasego-sego.github.io/terrashift/)** and go to the place you're interested in: move the map, or type a place name in the search box and press **Search** (or Enter). If more than one place matches, they're listed below the box: click one to go there.
    - Or press one of the **examples** (*Khalifa City: white fill*, *Lulu Island: earthworks*, *Al Mushrif: seasonal greening*). Each one sets an area and dates from the [validation tests](VALIDATION.md) and finds the images straight away.
 2. **Choose an area**:
    - Press **Draw area**, then press and drag a box on the map, *or*
@@ -48,7 +50,7 @@ It runs entirely in your web browser. There is no server and no API key: it is j
 Press **Copy link** (next to **Find images**) to copy a web address with your area and dates in it. Anyone who opens it sees the same area and dates, and the search runs by itself. The address in your browser's address bar also updates each time you press **Find images**, so you can bookmark it too. A link looks like this:
 
 ```
-https://kwetemasego-sego.github.io/change-detection/?area=24.38120,54.54020,24.39920,54.56000&before=2026-07-03&after=2026-10-01
+https://kwetemasego-sego.github.io/terrashift/?area=24.38120,54.54020,24.39920,54.56000&before=2026-07-03&after=2026-10-01
 ```
 
 `area` is the box's south, west, north and east edges (latitude and longitude), and `before` and `after` are the dates. If you were on the **Terrain** or **Place details** tab, the link ends with `&tab=terrain` or `&tab=place` and opens on that tab. The terrain is worked out again for whoever opens it. If a link's area or dates don't make sense (say the before date is later than the after date), the page says so and waits for you to choose.
@@ -258,8 +260,8 @@ Sentinel-2 images contain modified Copernicus Sentinel data. Licences and full c
 You need [Python](https://www.python.org/) (or any simple web server).
 
 ```
-git clone https://github.com/kwetemasego-sego/change-detection.git
-cd change-detection
+git clone https://github.com/kwetemasego-sego/terrashift.git
+cd terrashift
 python -m http.server 8000
 ```
 
@@ -293,7 +295,7 @@ The full validation asks the free image service for a lot of data, so instead of
 
 ### Releases
 
-A **release** is a named snapshot of the project at a moment when it worked, like "version 1.0", with a short note saying what's in it. It is marked by a **tag**, a label stuck on one commit. You can always go back to it, download it as a zip, or compare later versions with it. Releases are listed on the [Releases page](https://github.com/kwetemasego-sego/change-detection/releases).
+A **release** is a named snapshot of the project at a moment when it worked, like "version 1.0", with a short note saying what's in it. It is marked by a **tag**, a label stuck on one commit. You can always go back to it, download it as a zip, or compare later versions with it. Releases are listed on the [Releases page](https://github.com/kwetemasego-sego/terrashift/releases).
 
 ### Files
 
@@ -310,4 +312,4 @@ A **release** is a named snapshot of the project at a moment when it worked, lik
 | `package.json`, `package-lock.json` | The test tool (Puppeteer) and the test commands. The site itself doesn't need them |
 | `.github/workflows/` | Instructions for GitHub Actions: the tests on every push, and the weekly validation |
 
-The project started as a browser game. That version is kept on the [`game-version`](https://github.com/kwetemasego-sego/change-detection/tree/game-version) branch.
+The project started as a browser game. That version is kept on the [`game-version`](https://github.com/kwetemasego-sego/terrashift/tree/game-version) branch.

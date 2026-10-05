@@ -61,7 +61,7 @@ test("terrain of flat Khalifa City south, and the PDF report includes it", { tim
     window.jspdf.jsPDF = Original;
     return lines.join(" ");
   });
-  for (const words of ["Terrain", "Elevation: lowest", "Slope: average", "Aspect:", "Low-lying:", "Copernicus DEM GLO-30", "slopes of 15° or more"]) {
+  for (const words of ["TerraShift change report", "See how the land changes", "Terrain", "Elevation: lowest", "Slope: average", "Aspect:", "Low-lying:", "Copernicus DEM GLO-30", "slopes of 15° or more"]) {
     assert.ok(written.includes(words), "the report mentions " + words);
   }
 });

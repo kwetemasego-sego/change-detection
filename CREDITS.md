@@ -1,6 +1,6 @@
 # Credits
 
-This website is built from free code, map pictures and data made by other people. Thank you!
+TerraShift (*See how the land changes*) is built from free code, map pictures and data made by other people. Thank you!
 
 ## Satellite images
 

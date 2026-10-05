@@ -1,6 +1,6 @@
-# Validation: does the change detection find real change?
+# Validation: does TerraShift find real change?
 
-The tool was first tested on **4 October 2026** on six sites around Abu Dhabi: three with real change and three where nothing should have changed. That test found three weak spots, and the rules were then changed to fix them. All six sites were run again with the new rules, plus **two new sites** that hadn't been tested before. This page gives the results before and after the changes. Later, a ninth site, the mountain **Jebel Hafeet**, showed a new kind of false alarm, which the terrain now removes (see [Steep slopes](#steep-slopes-jebel-hafeet)).
+TerraShift (*See how the land changes*) was first tested on **4 October 2026** on six sites around Abu Dhabi: three with real change and three where nothing should have changed. That test found three weak spots, and the rules were then changed to fix them. All six sites were run again with the new rules, plus **two new sites** that hadn't been tested before. This page gives the results before and after the changes. Later, a ninth site, the mountain **Jebel Hafeet**, showed a new kind of false alarm, which the terrain now removes (see [Steep slopes](#steep-slopes-jebel-hafeet)).
 
 Every site used the dates **3 July to 1 October 2026** (90 days) and a box about **2 km × 2 km** (401 ha) centred on the coordinates below. Each site was run through the website in Chrome exactly as a user would, with the default settings.
 

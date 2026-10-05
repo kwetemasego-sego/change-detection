@@ -42,6 +42,14 @@ body {
   font-size: 15px;
 }
 
+/* The tagline under the name */
+.tagline {
+  font-size: 12px;
+  font-style: italic;
+  color: #555;
+  margin-bottom: 4px;
+}
+
 /* Each numbered step in the control panel, separated by a thin line */
 .step {
   margin-top: 10px;
