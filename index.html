@@ -4,306 +4,253 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TerraShift: See how the land changes</title>
+  <meta name="description" content="TerraShift compares free satellite photos of any place on two dates and colours in what changed: new buildings or bare ground, plants gained or lost, and burned land. It runs in your browser.">
+  <meta name="theme-color" content="#0b1a2b">
 
-  <!-- Leaflet's stylesheet (makes the map, zoom buttons and popups look right) -->
-  <link rel="stylesheet"
-        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-        crossorigin="">
+  <!-- Old shared links (…/terrashift/?area=…&before=…&after=…) pointed at the
+       tool, which now lives in app/. Send them there with the same search,
+       before anything else loads, so they keep working. -->
+  <script>
+    (function () {
+      var parameters = new URLSearchParams(location.search);
+      if (parameters.has("area") || parameters.has("before") || parameters.has("after")) {
+        location.replace("app/" + location.search + location.hash);
+      }
+    })();
+  </script>
 
-  <!-- Our own styles -->
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="landing.css">
+  <link rel="preload" as="image" href="docs/landing/hero-after.jpg">
 </head>
 <body>
-  <!-- The map will be drawn inside this empty box -->
-  <div id="map"></div>
+  <a class="skip-link" href="#main">Skip to the content</a>
 
-  <!-- The thin line that marks where the before/after swipe cuts the map -->
-  <div id="swipe-line" hidden></div>
-
-  <!-- Control panel that floats on top of the map -->
-  <div id="info-panel">
-    <div class="panel-title">TerraShift</div>
-    <div class="tagline">See how the land changes</div>
-    <div class="hint">
-      Compare Sentinel-2 satellite images of an area on two dates.
-      <a href="https://github.com/kwetemasego-sego/terrashift#readme" target="_blank" rel="noopener">How it works, limits and test results</a>
+  <header class="site-header">
+    <div class="wrap header-row">
+      <a class="brand" href="./" aria-label="TerraShift home">
+        <svg class="brand-icon" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="10" fill="#1d6fb8"/>
+          <path d="M9 13c3-2 5 1 8-1s4-3 6-1v3c-2 2-4 0-6 2s-5 2-8 0z M10 20c2-1 4 1 6 0s3-2 5 0c-2 3-6 4-9 2z" fill="#4fb35a"/>
+          <ellipse cx="16" cy="16" rx="15" ry="5.5" fill="none" stroke="#e0b878" stroke-width="1.6" transform="rotate(-25 16 16)"/>
+          <circle cx="28.6" cy="10.2" r="2" fill="#fff"/>
+        </svg>
+        TerraShift
+      </a>
+      <nav class="site-nav" aria-label="Sections">
+        <a href="#how">How it works</a>
+        <a href="#shows">What it shows</a>
+        <a href="#examples">Examples</a>
+        <a href="#limits">Limits</a>
+      </nav>
+      <a class="button button-small" href="app/">Launch</a>
     </div>
-    <div class="hint responsible-use">
-      Public 10 m satellite data: it can't identify people or vehicles. Don't use it to watch individuals or private property, and have a person check results before acting on them.
-      <a href="https://github.com/kwetemasego-sego/terrashift#responsible-use" target="_blank" rel="noopener">Responsible use</a>
-    </div>
+  </header>
 
-    <div class="step">
-      <strong>1. Area</strong>
-      <!-- Find a place by name (OpenStreetMap's Nominatim) -->
-      <form id="place-search" class="place-search">
-        <input id="place-input" type="search" placeholder="Find a place, e.g. Masdar City" aria-label="Find a place" autocomplete="off">
-        <button id="place-search-button" type="submit">Search</button>
-      </form>
-      <div id="place-search-status" class="small"></div>
-      <ul id="place-results" class="place-results" hidden></ul>
-      <div class="small credit-line">
-        Search by <a href="https://nominatim.org/" target="_blank" rel="noopener">Nominatim</a>,
-        data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors
-      </div>
-      <!-- One-click examples: an area and dates that show the tool well -->
-      <div class="small examples-label">Or try an example:</div>
-      <div id="examples" class="buttons examples"></div>
-      <div class="small">Or mark an area on the map:</div>
-      <div class="buttons">
-        <button id="draw-button" type="button">Draw area</button>
-        <button id="use-view-button" type="button">Use visible area</button>
-      </div>
-      <!-- Click to analyse: while it's on, a click on the map analyses a square around that spot -->
-      <div class="buttons">
-        <button id="click-mode-button" type="button" aria-pressed="false">Click to analyse</button>
-        <label class="small">Square
-          <select id="click-size">
-            <option value="1">1 km</option>
-            <option value="2" selected>2 km</option>
-            <option value="5">5 km</option>
-          </select>
-        </label>
-      </div>
-      <div id="area-text" class="small">No area chosen yet</div>
-    </div>
-
-    <div class="step">
-      <strong>2. Dates</strong>
-      <div class="dates">
-        <label>Before <input id="before-date" type="date"></label>
-        <label>After <input id="after-date" type="date"></label>
-      </div>
-      <div class="buttons">
-        <button id="find-button" type="button">Find images</button>
-        <button id="copy-link-button" type="button" disabled>Copy link</button>
-      </div>
-      <div id="copy-link-status" class="small"></div>
-    </div>
-
-    <div class="step">
-      <div><strong>Before image:</strong> <span id="before-info">-</span></div>
-      <div><strong>After image:</strong> <span id="after-info">-</span></div>
-      <!-- Brightness of the Sentinel-2 photos. "hidden" until photos are shown. -->
-      <div id="brightness-row" class="brightness" hidden>
-        <label for="brightness-slider">Brightness</label>
-        <input id="brightness-slider" type="range" min="50" max="200" step="10" value="100">
-        <span id="brightness-value">100%</span>
-      </div>
-      <div id="status-text" class="status">Start by choosing an area.</div>
-    </div>
-
-    <!-- 3. The results, in three tabs. "hidden" until an area is chosen. -->
-    <div class="step" id="results-step" hidden>
-      <div class="tabs" role="tablist" aria-label="Results">
-        <button id="tab-changes" type="button" role="tab" aria-controls="panel-changes" aria-selected="true">Changes</button>
-        <button id="tab-terrain" type="button" role="tab" aria-controls="panel-terrain" aria-selected="false">Terrain</button>
-        <button id="tab-place" type="button" role="tab" aria-controls="panel-place" aria-selected="false">Place details</button>
-      </div>
-
-      <!-- Tab 1: Changes -->
-      <div id="panel-changes" role="tabpanel" aria-labelledby="tab-changes">
-        <div id="changes-empty" class="small">Press Find images to look for changes between your two dates.</div>
-        <!-- Results of the change detection. "hidden" until there are results. -->
-        <div class="result-part" id="change-section" hidden>
-          <strong>Changes found</strong>
-          <!-- Each kind of change: its colour, name, size on the ground, and share of the area -->
-          <ul class="legend change-legend">
-            <li><span class="swatch gained"></span><span>Plants gained</span><b id="size-gained"></b><span id="pct-gained" class="pct"></span></li>
-            <li><span class="swatch lost"></span><span>Plants lost</span><b id="size-lost"></b><span id="pct-lost" class="pct"></span></li>
-            <li><span class="swatch built"></span><span>New buildings or bare ground</span><b id="size-built"></b><span id="pct-built" class="pct"></span></li>
-            <li><span class="swatch burned"></span><span>Burned</span><b id="size-burned"></b><span id="pct-burned" class="pct"></span></li>
-          </ul>
-          <div id="change-total"></div>
-          <div id="bright-note" class="small" hidden></div>
-          <div class="small">
-            <span class="swatch skipped"></span>Skipped because of cloud, shadow or missing data:
-            <span id="pct-skipped"></span>
+  <main id="main">
+    <!-- Hero: the name, what it does, the launch button and a real before/after -->
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div class="hero-text">
+          <p class="eyebrow">Free satellite change detection</p>
+          <h1>TerraShift</h1>
+          <p class="tagline">See how the land changes</p>
+          <p class="lead">
+            Pick a place and two dates. TerraShift finds clear satellite photos
+            from those dates and colours in what changed.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-large" href="app/">Launch TerraShift</a>
+            <a class="text-link" href="#examples">or try an example</a>
           </div>
-          <!-- Shown when the two images are from different seasons -->
-          <div id="season-note" class="season-note" hidden>
-            <div id="season-text"></div>
-            <div class="buttons">
-              <button id="year-check-button" type="button">Compare with a year earlier</button>
-              <button id="year-check-toggle" type="button" hidden>Show year-apart changes</button>
-            </div>
-            <div id="year-check-text" class="small"></div>
-          </div>
-          <div class="small">
-            A hectare (ha) is 10,000 m²: a square 100 m long on each side, a bit bigger than a football pitch.
-          </div>
-          <div class="buttons">
-            <button id="change-toggle" type="button">Hide changes</button>
-          </div>
-          <div class="buttons">
-            <button id="report-button" type="button">Download report</button>
-            <button id="geojson-button" type="button">Download GeoJSON</button>
-          </div>
-          <div id="download-status" class="small"></div>
-          <details class="small">
-            <summary>How are changes found?</summary>
-            <p>
-              Each 10 m square gets a plant greenness score (NDVI) and a built-up score
-              (NDBI), both from −1 to +1. A square only counts as changed if its plant
-              score moved by <b>0.15</b> or more, or its built-up score rose by <b>0.10</b>
-              or more. Smaller shifts usually come from haze, the sun's angle or the
-              season, not from real changes on the ground.
-            </p>
-            <p>
-              Bright new surfaces, like white fill on a building plot, can make the built-up
-              score go <i>down</i>. So a square also counts as new buildings or bare ground if
-              it became at least <b>30%</b> brighter in visible light than the area as a whole
-              did, ends up brighter than the area's usual ground, and is part of a patch of at
-              least <b>2,500 m²</b>. Ground beside water or plants is left out, because drying
-              out makes it brighter too. So is ground on slopes of <b>15°</b> or more (from the
-              Terrain tab): the sun lights steep slopes much more or less brightly as it gets
-              higher or lower through the year, so brightening there is usually just the light.
-            </p>
-            <p>
-              Surfaces that were already dark, like solar panels, dark roofs and asphalt,
-              aren't counted as new buildings if they only got darker. Dust, cleaning and
-              shadows do that without anything new being built.
-            </p>
-            <p>
-              A square counts as <b>burned</b> if its burn ratio (NBR) fell by <b>0.27</b> or
-              more, the level usually called a moderate burn, where there were some plants
-              to burn. Burned ground goes dark in near-infrared light but not in short-wave
-              infrared, so squares that went dark in both (shadows, water, new dark roofs)
-              are not counted as burned. Nor are squares that got brighter in near-infrared,
-              like wet mud drying out.
-            </p>
-            <p>
-              A changed square also needs at least 2 neighbours that changed the same way,
-              because real changes cover a patch of ground. Water and shorelines, ground
-              that was wet before, and ground that fell into a new shadow are left out,
-              because tides and the sun make them look different without anything changing.
-            </p>
-            <p>
-              Lawns, crops and trees green up and dry out with the seasons. If your two
-              images are from different seasons, a note says so, and <b>Compare with a year
-              earlier</b> shows how much of the plant change is probably seasonal.
-            </p>
-          </details>
+          <p class="hero-note">Free, no account, runs in your browser.</p>
         </div>
 
-        <!-- The time series: images between the two dates. "hidden" until it starts loading. -->
-        <div class="result-part" id="series-section" hidden>
-          <strong>Over time</strong>
-          <div id="series-status" class="small"></div>
-          <progress id="series-progress" hidden></progress>
-          <div id="series-chart" class="chart"></div>
-          <div id="series-player" hidden>
-            <ul class="legend series-legend">
-              <li><span class="line-swatch ndvi"></span>Plant score (NDVI)</li>
-              <li><span class="line-swatch ndbi"></span>Built-up score (NDBI)</li>
+        <figure class="hero-figure">
+          <div class="compare" id="compare" style="--position: 50%">
+            <img class="compare-after" id="compare-after" src="docs/landing/hero-after.jpg" width="900" height="900"
+                 alt="After: Lulu Island, Abu Dhabi, on 29 September 2026, with new earthworks and a planted area">
+            <img class="compare-before" src="docs/landing/hero-before.jpg" width="900" height="900"
+                 alt="Before: Lulu Island, Abu Dhabi, on 6 July 2026">
+            <span class="compare-label compare-label-before">Before · 6 Jul 2026</span>
+            <span class="compare-label compare-label-after">After · 29 Sep 2026</span>
+            <div class="compare-handle" aria-hidden="true"><span></span></div>
+            <input class="compare-range" id="compare-range" type="range" min="0" max="100" value="50"
+                   aria-label="Drag to compare before and after">
+          </div>
+          <figcaption>
+            <span>Lulu Island, Abu Dhabi. Drag the line to compare.</span>
+            <button type="button" class="chip" id="compare-changes" aria-pressed="false">Show changes</button>
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- How it works in 3 steps -->
+    <section class="section" id="how">
+      <div class="wrap">
+        <h2>How it works</h2>
+        <ol class="steps">
+          <li>
+            <span class="step-number">1</span>
+            <h3>Choose a place</h3>
+            <p>Search for a place, move the map, or click a spot. Then draw the area you want to check.</p>
+          </li>
+          <li>
+            <span class="step-number">2</span>
+            <h3>Pick two dates</h3>
+            <p>A before date and an after date. TerraShift finds the clearest Sentinel-2 photo near each one.</p>
+          </li>
+          <li>
+            <span class="step-number">3</span>
+            <h3>See what changed</h3>
+            <p>Swipe between the two photos. Coloured squares show where the land changed, with a summary in hectares.</p>
+          </li>
+        </ol>
+        <figure class="tool-shot">
+          <img src="docs/landing/tool.jpg" width="1400" height="860" loading="lazy"
+               alt="The TerraShift tool on Khalifa City south, Abu Dhabi: before and after photos split by a slider, blue squares on a plot of new white fill, and the results panel on the right">
+          <figcaption>The tool: the map with the before/after slider, and the results panel on the right.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- What it can show, each with a real screenshot -->
+    <section class="section section-tint" id="shows">
+      <div class="wrap">
+        <h2>What it can show</h2>
+        <p class="section-lead">Every picture here is a real result from TerraShift.</p>
+        <div class="cards">
+          <article class="card">
+            <img src="docs/landing/built.jpg" width="640" height="640" loading="lazy"
+                 alt="Khalifa City south, Abu Dhabi: blue squares over a plot newly covered in white fill">
+            <div class="card-body">
+              <h3><span class="swatch swatch-built" aria-hidden="true"></span>New buildings or bare ground</h3>
+              <p>Building sites, new roads, cleared land and fresh fill. Shown in blue.</p>
+              <p class="card-place">Khalifa City south, Abu Dhabi, Jul to Sep 2026</p>
+            </div>
+          </article>
+          <article class="card">
+            <img src="docs/landing/plants.jpg" width="640" height="640" loading="lazy"
+                 alt="Al Mushrif, Abu Dhabi: green squares where park lawns and trees grew greener, with a few red squares where plants were lost">
+            <div class="card-body">
+              <h3><span class="swatch swatch-gained" aria-hidden="true"></span><span class="swatch swatch-lost" aria-hidden="true"></span>Plants gained or lost</h3>
+              <p>New parks and farms, cleared trees, and seasonal greening. Green for gained, red for lost.</p>
+              <p class="card-place">Al Mushrif, Abu Dhabi, Jul to Sep 2026</p>
+            </div>
+          </article>
+          <article class="card">
+            <img src="docs/landing/burned.jpg" width="640" height="640" loading="lazy"
+                 alt="The Palisades fire, Los Angeles: dark orange squares across the burned hills, and red where plants were lost">
+            <div class="card-body">
+              <h3><span class="swatch swatch-burned" aria-hidden="true"></span>Burned land</h3>
+              <p>Ground where plants burned, found with the burn ratio. Shown in dark orange.</p>
+              <p class="card-place">Palisades fire, Los Angeles, Dec 2024 to Feb 2025</p>
+            </div>
+          </article>
+          <article class="card">
+            <img src="docs/landing/terrain.jpg" width="640" height="640" loading="lazy"
+                 alt="Jebel Hafeet near Al Ain: a grey hillshade showing the mountain's ridges and valleys">
+            <div class="card-body">
+              <h3><span class="swatch swatch-terrain" aria-hidden="true"></span>Terrain</h3>
+              <p>Height, slope, which way slopes face, low-lying ground, a hillshade and an elevation profile.</p>
+              <p class="card-place">Jebel Hafeet, near Al Ain</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- The three examples from the tool, as links that open it with the example loaded.
+         Each link is the tool's own share link for that example (tests/landing.test.js checks they match). -->
+    <section class="section" id="examples">
+      <div class="wrap">
+        <h2>Try an example</h2>
+        <p class="section-lead">Each one opens TerraShift with an area and dates already chosen, and starts the search.</p>
+        <div class="examples">
+          <a class="example" href="app/?area=24.38120,54.54020,24.39920,54.56000&amp;before=2026-07-03&amp;after=2026-10-01">
+            <strong>Khalifa City: white fill</strong>
+            <span>A plot covered in bright new fill</span>
+          </a>
+          <a class="example" href="app/?area=24.48530,54.33510,24.50330,54.35490&amp;before=2026-07-03&amp;after=2026-10-01">
+            <strong>Lulu Island: earthworks</strong>
+            <span>Land being reshaped on an island</span>
+          </a>
+          <a class="example" href="app/?area=24.44700,54.37610,24.46500,54.39590&amp;before=2026-07-03&amp;after=2026-10-01">
+            <strong>Al Mushrif: seasonal greening</strong>
+            <span>Parks and gardens changing with the seasons</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- What it can and can't do -->
+    <section class="section section-tint" id="limits">
+      <div class="wrap">
+        <h2>What it can and can't do</h2>
+        <div class="limits">
+          <div class="limit-box limit-can">
+            <h3>It can</h3>
+            <ul>
+              <li>Use free Sentinel-2 photos at <strong>10 m resolution</strong>: each square is about the size of a house.</li>
+              <li>Find changes across an area: a building site, a new park, a burned hillside.</li>
+              <li>Warn when plant changes may just be the seasons, and check them against a year earlier.</li>
+              <li>Save the results as a PDF report or as map shapes (GeoJSON).</li>
             </ul>
-            <div id="series-readout" class="small"></div>
-            <div class="buttons">
-              <button id="play-button" type="button">Play</button>
-              <label class="small">Speed
-                <select id="speed-select">
-                  <option value="1500">Slow</option>
-                  <option value="700" selected>Normal</option>
-                  <option value="250">Fast</option>
-                </select>
-              </label>
-              <button id="back-button" type="button" hidden>Back to before/after</button>
-            </div>
+          </div>
+          <div class="limit-box limit-cannot">
+            <h3>It can't</h3>
+            <ul>
+              <li>See <strong>people or vehicles</strong>. At 10 m they are far too small.</li>
+              <li>See small things like a single new shed or a parked car. It shows <strong>area-level changes only</strong>.</li>
+              <li>See through clouds. If both dates are cloudy, try other dates.</li>
+              <li>Replace a survey. It makes mistakes, so check the photos.</li>
+            </ul>
           </div>
         </div>
+        <p class="limits-link">
+          It was checked against nine test sites around Abu Dhabi and Dubai, and against the official map of the Palisades fire.
+          <a href="https://github.com/kwetemasego-sego/terrashift/blob/main/VALIDATION.md">See the validation results</a>
+        </p>
       </div>
+    </section>
 
-      <!-- Tab 2: Terrain, from the Copernicus elevation model -->
-      <div id="panel-terrain" role="tabpanel" aria-labelledby="tab-terrain" hidden>
-        <div id="terrain-status" class="small"></div>
-        <div id="terrain-results" hidden>
-          <dl class="facts">
-            <dt>Elevation</dt><dd id="terrain-elevation"></dd>
-            <dt>Slope</dt><dd id="terrain-slope"></dd>
-            <dt>Aspect</dt><dd id="terrain-aspect"></dd>
-            <dt>Low-lying</dt><dd id="terrain-low"></dd>
-          </dl>
-          <div class="buttons">
-            <button id="hillshade-button" type="button">Show hillshade</button>
-          </div>
-          <div class="small"><strong>Elevation profile</strong> from west to east, along the dashed line on the map:</div>
-          <div id="profile-chart" class="chart"></div>
-          <div class="small">
-            Heights are of the surface, so in towns they include buildings and trees,
-            and the steepest slope may be the edge of a building.
-          </div>
-        </div>
-        <!-- What the terrain words mean: filled in from TERRAIN_WORDS in main.js -->
-        <div class="small words-title"><strong>What the words mean</strong></div>
-        <dl id="terrain-words" class="small words"></dl>
-        <div class="credits">
-          Elevation: Copernicus DEM GLO-30, 30 m, © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH
-          2014–2018, provided under COPERNICUS by the European Union and ESA, via Microsoft Planetary Computer.
-        </div>
+    <!-- Responsible use -->
+    <section class="section" id="responsible-use">
+      <div class="wrap">
+        <h2>Responsible use</h2>
+        <p class="narrow">
+          TerraShift is for seeing how land changes, such as building sites, farms, parks and fires.
+          Please don't use it to watch people or private property. It uses public 10 m satellite data,
+          so it can't identify anyone, and it can be wrong. A person should check the before and after
+          photos before anyone acts on a result.
+        </p>
       </div>
+    </section>
 
-      <!-- Tab 3: Place details for the centre of the area -->
-      <div id="panel-place" role="tabpanel" aria-labelledby="tab-place" hidden>
-        <div class="small">For the centre of the chosen area <span id="place-coords"></span>.</div>
-        <dl class="facts">
-          <dt>Elevation</dt>   <dd id="detail-elevation">-</dd>
-          <dt>Weather now</dt> <dd id="detail-weather">-</dd>
-          <dt>Climate</dt>     <dd id="detail-climate">-</dd>
-          <dt>Soil</dt>        <dd id="detail-soil">-</dd>
-          <dt>Land cover</dt>  <dd id="detail-landcover">-</dd>
-          <dt>Wildlife</dt>    <dd id="detail-wildlife">-</dd>
-        </dl>
-        <div class="credits">
-          Data: Copernicus Sentinel-2 via Microsoft Planetary Computer · Open-Meteo · ISRIC SoilGrids ·
-          © OpenStreetMap contributors · GBIF.
-          <a href="https://github.com/kwetemasego-sego/terrashift/blob/main/CREDITS.md" target="_blank" rel="noopener">Full credits</a>.
-        </div>
+    <section class="cta">
+      <div class="wrap cta-row">
+        <p>Ready to see how a place has changed?</p>
+        <a class="button button-large" href="app/">Launch TerraShift</a>
       </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-row">
+      <div>
+        <strong>TerraShift</strong>
+        <p>Satellite images: Copernicus Sentinel-2, via Microsoft Planetary Computer.</p>
+      </div>
+      <nav class="footer-links" aria-label="Project links">
+        <a href="https://github.com/kwetemasego-sego/terrashift">Code on GitHub</a>
+        <a href="https://github.com/kwetemasego-sego/terrashift#readme">README</a>
+        <a href="https://github.com/kwetemasego-sego/terrashift/blob/main/VALIDATION.md">VALIDATION.md</a>
+        <a href="https://github.com/kwetemasego-sego/terrashift/blob/main/CREDITS.md">CREDITS.md</a>
+        <a href="https://github.com/kwetemasego-sego/terrashift/releases/latest">Latest release</a>
+      </nav>
     </div>
+  </footer>
 
-    <div class="step">
-      <div class="small"><strong>Pointer:</strong> <span id="pointer-position">-</span></div>
-      <div class="buttons">
-        <button id="map-view-button" type="button">Show street map</button>
-        <button id="locate-button" type="button">Locate me</button>
-      </div>
-      <div id="locate-status"></div>
-    </div>
-  </div>
-
-  <!-- Notes at the top middle of the map -->
-  <div id="map-notes">
-    <!-- The date of the time-series image on the map -->
-    <div id="frame-date" hidden></div>
-    <!-- Shown when zoomed in closer than the Sentinel-2 photos' 10 m pixels can show -->
-    <div id="zoom-note" hidden>Zoom out for a clearer image</div>
-  </div>
-
-  <!-- The before/after slider. "hidden" keeps it invisible until there are images to compare. -->
-  <div id="swipe-bar" hidden>
-    <span id="swipe-before-label">Before</span>
-    <input id="swipe-slider" type="range" min="0" max="100" value="50" aria-label="Swipe between before and after">
-    <span id="swipe-after-label">After</span>
-  </div>
-
-  <!-- Leaflet's JavaScript (the mapping library itself) -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-          crossorigin=""></script>
-
-  <!-- geotiff.js reads the satellite image files (GeoTIFFs) in the browser -->
-  <script src="https://cdn.jsdelivr.net/npm/geotiff@3.0.5/dist-browser/geotiff.js"></script>
-
-  <!-- jsPDF makes the PDF report in the browser -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js"
-          integrity="sha512-plOdviVmws4Y3JAvbnpfKb2hVxKM1lCwsi3vmElYRj+tiDLffZ4FVUj5a8vyKJ9pIgl8JCAHEJ4D1iUKBecswg=="
-          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-
-  <!-- proj4 converts latitude/longitude into the satellite images' own map grid (UTM) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.15.0/proj4.js"></script>
-
-  <!-- Our own code. It must come AFTER the libraries above, because it uses them. -->
-  <script src="main.js"></script>
+  <script src="landing.js"></script>
 </body>
 </html>

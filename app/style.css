@@ -42,6 +42,16 @@ body {
   font-size: 15px;
 }
 
+/* The name links back to the home page, but looks like a heading */
+.panel-title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.panel-title a:hover {
+  text-decoration: underline;
+}
+
 /* The tagline under the name */
 .tagline {
   font-size: 12px;

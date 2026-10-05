@@ -9,7 +9,9 @@ TerraShift shows what changed in a place over a few months, using free Sentinel-
 
 Draw an area on the map, or click a spot, and pick two dates. The tool finds the clearest satellite photo near each date, lets you swipe between them, and colours in what changed: plants that grew or disappeared, new buildings or bare ground, and burned land. It warns when plant changes may just be the seasons, and can check them against a year earlier. For the same area it also works out the terrain from a 30 m elevation model: how high, how steep, which way slopes face, how much is low-lying, a hillshade and an elevation profile.
 
-**Live site: https://kwetemasego-sego.github.io/terrashift/**
+**Live site: https://kwetemasego-sego.github.io/terrashift/** (an introduction, with real before/after pictures and examples)
+
+**Open the tool: https://kwetemasego-sego.github.io/terrashift/app/**
 
 It runs entirely in your web browser. There is no server and no API key: it is just HTML, CSS and JavaScript, hosted on GitHub Pages.
 
@@ -21,7 +23,7 @@ It runs entirely in your web browser. There is no server and no API key: it is j
 
 ## How to use it
 
-1. **Open the [live site](https://kwetemasego-sego.github.io/terrashift/)** and go to the place you're interested in: move the map, or type a place name in the search box and press **Search** (or Enter). If more than one place matches, they're listed below the box: click one to go there.
+1. **Open [the tool](https://kwetemasego-sego.github.io/terrashift/app/)** (or press **Launch TerraShift** on the [home page](https://kwetemasego-sego.github.io/terrashift/)) and go to the place you're interested in: move the map, or type a place name in the search box and press **Search** (or Enter). If more than one place matches, they're listed below the box: click one to go there.
    - Or press one of the **examples** (*Khalifa City: white fill*, *Lulu Island: earthworks*, *Al Mushrif: seasonal greening*). Each one sets an area and dates from the [validation tests](VALIDATION.md) and finds the images straight away.
 2. **Choose an area**:
    - Press **Draw area**, then press and drag a box on the map, *or*
@@ -50,10 +52,12 @@ It runs entirely in your web browser. There is no server and no API key: it is j
 Press **Copy link** (next to **Find images**) to copy a web address with your area and dates in it. Anyone who opens it sees the same area and dates, and the search runs by itself. The address in your browser's address bar also updates each time you press **Find images**, so you can bookmark it too. A link looks like this:
 
 ```
-https://kwetemasego-sego.github.io/terrashift/?area=24.38120,54.54020,24.39920,54.56000&before=2026-07-03&after=2026-10-01
+https://kwetemasego-sego.github.io/terrashift/app/?area=24.38120,54.54020,24.39920,54.56000&before=2026-07-03&after=2026-10-01
 ```
 
 `area` is the box's south, west, north and east edges (latitude and longitude), and `before` and `after` are the dates. If you were on the **Terrain** or **Place details** tab, the link ends with `&tab=terrain` or `&tab=place` and opens on that tab. The terrain is worked out again for whoever opens it. If a link's area or dates don't make sense (say the before date is later than the after date), the page says so and waits for you to choose.
+
+Older links without `/app/` (from before the home page was added) still work: the home page sends them on to the tool with the same area, dates and tab.
 
 ### Terrain
 
@@ -207,7 +211,7 @@ It was tested on nine sites (3 July to 1 October 2026): six around Abu Dhabi, a 
 
 Full results, pictures and how the sites were chosen: **[VALIDATION.md](VALIDATION.md)**.
 
-All the numbers above are settings at the top of [`main.js`](main.js), so they're easy to adjust.
+All the numbers above are settings at the top of [`app/main.js`](app/main.js), so they're easy to adjust.
 
 ---
 
@@ -265,7 +269,7 @@ cd terrashift
 python -m http.server 8000
 ```
 
-Then open **http://localhost:8000** in your browser. Press **Ctrl+C** in the terminal to stop the server. **Locate me** only works on `localhost` or `https://` pages.
+Then open **http://localhost:8000** in your browser for the home page, or **http://localhost:8000/app/** for the tool. Press **Ctrl+C** in the terminal to stop the server. **Locate me** only works on `localhost` or `https://` pages.
 
 ## Running the tests
 
@@ -279,7 +283,7 @@ Then:
 
 | Command | What it checks | Time | Needs the internet? |
 |---|---|---|---|
-| `npm run test:quick` | The page loads, and the change rules give the right answers on made-up data: white fill is found, small bright patches and cleaned solar panels aren't, seasons are worked out, the summary adds up. The terrain numbers on made-up heights: flat ground, a known 5.7° slope, which way slopes face, the hillshade, missing heights. Also shared links (made, read back, bad ones refused, opening one starts the search, the tab kept), **Copy link**, the examples, **Click to analyse** (off and on, 1, 2 and 5 km squares, your own dates kept), the tabs, and the place search's rules (only on Search, at most once a second, answers kept, credit shown), using made-up place search answers | About 20 seconds | Only for the map libraries |
+| `npm run test:quick` | The page loads, and the change rules give the right answers on made-up data: white fill is found, small bright patches and cleaned solar panels aren't, seasons are worked out, the summary adds up. The terrain numbers on made-up heights: flat ground, a known 5.7° slope, which way slopes face, the hillshade, missing heights. The landing page (its pictures, slider, example links and footer, and that it fits a phone screen), and old links to the main address being forwarded to `/app/`. Also shared links (made, read back, bad ones refused, opening one starts the search, the tab kept), **Copy link**, the examples, **Click to analyse** (off and on, 1, 2 and 5 km squares, your own dates kept), the tabs, and the place search's rules (only on Search, at most once a second, answers kept, credit shown), using made-up place search answers | About 20 seconds | Only for the map libraries |
 | `npm test` | The quick tests, plus one real site (Khalifa City south) run like a user would: real Sentinel-2 images, the white plot found, the seasonal warning and the year-apart check, the same site opened from a shared link, and the PDF report. Also real terrain for flat Khalifa City south and hilly Jebel Hafeet | About 1 minute | Yes |
 | `npm run test:validation` | All nine sites from [VALIDATION.md](VALIDATION.md), each checked against what a good result looks like. The numbers are saved in `test-output/validation.json` | About 2 to 5 minutes | Yes |
 
@@ -301,14 +305,17 @@ A **release** is a named snapshot of the project at a moment when it worked, lik
 
 | File | What it does |
 |---|---|
-| `index.html` | The page: map, control panel with the result tabs, and slider |
-| `style.css` | How everything looks |
-| `main.js` | All the code: map, choosing an area (including Click to analyse) and dates, place search, examples and links, finding images, reading bands, change detection, terrain, time series and timelapse, downloads, swipe slider, place details |
+| `index.html` | The home page at the main address: what TerraShift does, with real pictures, examples and limits. It also forwards old shared links (the main address with `?area=…`) to the tool |
+| `landing.css`, `landing.js` | How the home page looks, and its before/after slider |
+| `app/index.html` | The tool's page: map, control panel with the result tabs, and slider |
+| `app/style.css` | How the tool looks |
+| `app/main.js` | All the tool's code: map, choosing an area (including Click to analyse) and dates, place search, examples and links, finding images, reading bands, change detection, terrain, time series and timelapse, downloads, swipe slider, place details |
 | `CREDITS.md` | Data sources, libraries and licences |
 | `VALIDATION.md` | Test results on nine sites, before and after the latest rule changes |
 | `docs/validation/` | Before, after and result pictures for each test site |
 | `docs/screenshot.jpg`, `docs/terrain.jpg` | The screenshots in this README |
-| `tests/` | The browser tests: `unit.test.js` (quick, made-up data), `sharing.test.js` (links, place search and examples, with made-up place search answers), `terrain.test.js` (terrain numbers, Click to analyse and the tabs), `smoke.test.js` (one real site), `validation.js` (all nine sites), `sites.js` (the sites and how to run one) and `helpers.js` (starts a web server and headless Chrome) |
+| `docs/landing/` | The screenshots on the home page, all taken from the tool |
+| `tests/` | The browser tests: `unit.test.js` (quick, made-up data), `sharing.test.js` (links, place search and examples, with made-up place search answers), `terrain.test.js` (terrain numbers, Click to analyse and the tabs), `landing.test.js` (the home page and old links being forwarded), `smoke.test.js` (one real site), `validation.js` (all nine sites), `sites.js` (the sites and how to run one) and `helpers.js` (starts a web server and headless Chrome) |
 | `package.json`, `package-lock.json` | The test tool (Puppeteer) and the test commands. The site itself doesn't need them |
 | `.github/workflows/` | Instructions for GitHub Actions: the tests on every push, and the weekly validation |
 

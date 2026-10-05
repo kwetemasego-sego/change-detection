@@ -127,7 +127,7 @@ test("a link with a bad area says so instead of searching", async function () {
 
 test("Copy link copies the current area and dates", async function () {
   const { page } = await openPage();
-  await site.browser.defaultBrowserContext().overridePermissions(site.url.replace(/\/$/, ""), ["clipboard-read", "clipboard-write", "clipboard-sanitized-write"]);
+  await site.browser.defaultBrowserContext().overridePermissions(new URL(site.url).origin, ["clipboard-read", "clipboard-write", "clipboard-sanitized-write"]);
   assert.equal(await page.$eval("#copy-link-button", function (b) { return b.disabled; }), true, "disabled until there is an area");
   await page.evaluate(function () {
     setArea(L.latLngBounds([24.418, 54.605], [24.436, 54.625]));

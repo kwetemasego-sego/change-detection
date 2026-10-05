@@ -1,0 +1,735 @@
+/* TerraShift landing page. The colours follow the tool: its link blue, and
+   the change colours (blue = new buildings or bare ground, green = plants
+   gained, red = plants lost, dark orange = burned, brown = the terrain profile). */
+:root {
+  --space: #0b1a2b;        /* the dark night-side blue of the hero and footer */
+  --space-2: #12304d;
+  --ink: #1b2733;          /* body text */
+  --muted: #56636f;
+  --line: #dde3e8;
+  --tint: #f3f6f8;         /* the background of every other section */
+  --paper: #ffffff;
+  --accent: #1a6fd0;       /* buttons, close to the tool's link blue */
+  --accent-dark: #1459a8;
+  --link: #1a5fb4;         /* the tool's link colour */
+  --sand: #e0b878;         /* desert sand, for small highlights */
+  --built: #0074d9;
+  --gained: #2ecc40;
+  --lost: #ff4136;
+  --burned: #a64b00;
+  --terrain: #8a5a2b;
+  --radius: 14px;
+  --shadow: 0 10px 30px rgba(11, 26, 43, 0.12);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-text-size-adjust: 100%;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+a {
+  color: var(--link);
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+  margin: 0;
+}
+
+h2 {
+  font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+  letter-spacing: -0.01em;
+  margin-bottom: 12px;
+}
+
+h3 {
+  font-size: 1.1rem;
+}
+
+.wrap {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.narrow {
+  max-width: 760px;
+}
+
+/* For keyboard users: a link straight to the content, visible when focused */
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  z-index: 100;
+  padding: 8px 14px;
+  background: var(--paper);
+  border-radius: 8px;
+}
+
+.skip-link:focus {
+  top: 12px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--sand);
+  outline-offset: 2px;
+}
+
+/* --- Buttons --- */
+.button {
+  display: inline-block;
+  font-weight: 600;
+  text-decoration: none;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 10px;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.button:hover {
+  background: var(--accent-dark);
+  transform: translateY(-1px);
+}
+
+.button-large {
+  font-size: 1.1rem;
+  padding: 14px 28px;
+  box-shadow: 0 6px 20px rgba(26, 111, 208, 0.4);
+}
+
+.button-small {
+  font-size: 0.95rem;
+  padding: 7px 16px;
+}
+
+/* --- Header --- */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(11, 26, 43, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.header-row {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 60px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: #fff;
+  text-decoration: none;
+}
+
+.brand-icon {
+  width: 30px;
+  height: 30px;
+}
+
+.site-nav {
+  display: flex;
+  gap: 22px;
+  margin-left: auto;
+}
+
+.site-nav a {
+  color: rgba(255, 255, 255, 0.8);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.site-nav a:hover {
+  color: #fff;
+}
+
+/* --- Hero --- */
+.hero {
+  color: #fff;
+  background:
+    radial-gradient(ellipse at 80% 20%, rgba(26, 111, 208, 0.35), transparent 55%),
+    radial-gradient(ellipse at 10% 90%, rgba(224, 184, 120, 0.16), transparent 50%),
+    linear-gradient(180deg, var(--space) 0%, var(--space-2) 100%);
+  padding: 64px 0 72px;
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 56px;
+  align-items: center;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sand);
+}
+
+.hero h1 {
+  font-size: clamp(2.8rem, 7vw, 4.4rem);
+  letter-spacing: -0.03em;
+}
+
+.tagline {
+  margin: 6px 0 18px;
+  font-size: clamp(1.3rem, 3vw, 1.7rem);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.lead {
+  margin: 0 0 28px;
+  max-width: 34em;
+  font-size: 1.1rem;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 22px;
+}
+
+.text-link {
+  color: #fff;
+  font-weight: 500;
+}
+
+.hero-note {
+  margin: 18px 0 0;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* --- The before/after slider --- */
+.hero-figure {
+  margin: 0;
+}
+
+.compare {
+  --position: 50%;
+  position: relative;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: var(--radius);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+  background: var(--space-2);
+  cursor: ew-resize;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: pan-y; /* a sideways drag moves the line; an up-down swipe still scrolls the page */
+}
+
+.compare img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+/* The before photo is cut off at the line, so the after photo shows to its right */
+.compare-before {
+  clip-path: inset(0 calc(100% - var(--position)) 0 0);
+}
+
+.compare-label {
+  position: absolute;
+  top: 12px;
+  padding: 3px 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(11, 26, 43, 0.7);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.compare-label-before {
+  left: 12px;
+}
+
+.compare-label-after {
+  right: 12px;
+}
+
+.compare-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--position);
+  width: 3px;
+  margin-left: -1.5px;
+  background: #fff;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.compare-handle span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 42px;
+  height: 42px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+/* Two small arrows inside the round handle */
+.compare-handle span::before,
+.compare-handle span::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 0;
+  height: 0;
+  margin-top: -6px;
+  border: 6px solid transparent;
+}
+
+.compare-handle span::before {
+  left: 6px;
+  border-right-color: var(--space);
+}
+
+.compare-handle span::after {
+  right: 6px;
+  border-left-color: var(--space);
+}
+
+/* The slider input is invisible but there for the keyboard and screen readers */
+.compare-range {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.compare:focus-within .compare-handle span {
+  outline: 3px solid var(--sand);
+  outline-offset: 2px;
+}
+
+.hero-figure figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.chip {
+  font: inherit;
+  font-weight: 600;
+  padding: 6px 14px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.chip[aria-pressed="true"] {
+  background: var(--built);
+  border-color: var(--built);
+}
+
+/* --- Sections --- */
+.section {
+  padding: 80px 0;
+}
+
+.section-tint {
+  background: var(--tint);
+}
+
+.section-lead {
+  margin: 0 0 32px;
+  color: var(--muted);
+}
+
+/* How it works */
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  margin: 28px 0 48px;
+  padding: 0;
+  list-style: none;
+}
+
+.steps li {
+  padding: 26px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.step-number {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 14px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--space-2));
+  border-radius: 50%;
+}
+
+.steps h3 {
+  margin-bottom: 6px;
+}
+
+.steps p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.tool-shot {
+  margin: 0;
+}
+
+.tool-shot img {
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.tool-shot figcaption,
+.card-place {
+  margin-top: 10px;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+/* What it can show */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 22px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 2px 8px rgba(11, 26, 43, 0.05);
+}
+
+.card img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.card-body {
+  padding: 18px 20px 20px;
+}
+
+.card h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.card p {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.card .card-place {
+  margin-top: 10px;
+  font-size: 0.82rem;
+}
+
+.swatch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+
+.swatch-built { background: var(--built); }
+.swatch-gained { background: var(--gained); }
+.swatch-lost { background: var(--lost); }
+.swatch-burned { background: var(--burned); }
+.swatch-terrain { background: linear-gradient(135deg, #eee, #555); }
+
+/* Try an example */
+.examples {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+
+.example {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 22px 24px;
+  text-decoration: none;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--accent);
+  border-radius: var(--radius);
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+
+.example:hover {
+  box-shadow: var(--shadow);
+  transform: translateY(-2px);
+}
+
+.example strong {
+  color: var(--link);
+  font-size: 1.05rem;
+}
+
+.example strong::after {
+  content: " →";
+}
+
+.example span {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+/* What it can and can't do */
+.limits {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+}
+
+.limit-box {
+  padding: 26px 28px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.limit-box h3 {
+  margin-bottom: 10px;
+}
+
+.limit-box ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.limit-box li + li {
+  margin-top: 8px;
+}
+
+.limit-can {
+  border-top: 4px solid var(--gained);
+}
+
+.limit-cannot {
+  border-top: 4px solid var(--lost);
+}
+
+.limits-link {
+  margin: 26px 0 0;
+}
+
+.limits-link a {
+  font-weight: 600;
+}
+
+/* The last call to action */
+.cta {
+  padding: 56px 0;
+  color: #fff;
+  background:
+    radial-gradient(ellipse at 90% 50%, rgba(26, 111, 208, 0.35), transparent 60%),
+    var(--space-2);
+}
+
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.cta p {
+  margin: 0;
+  font-size: clamp(1.3rem, 3vw, 1.6rem);
+  font-weight: 600;
+}
+
+/* --- Footer --- */
+.site-footer {
+  padding: 40px 0;
+  font-size: 0.92rem;
+  color: rgba(255, 255, 255, 0.7);
+  background: var(--space);
+}
+
+.footer-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.site-footer strong {
+  color: #fff;
+}
+
+.site-footer p {
+  margin: 4px 0 0;
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  align-items: center;
+}
+
+.footer-links a {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.footer-links a:hover {
+  color: #fff;
+}
+
+/* --- Tablets --- */
+@media (max-width: 960px) {
+  .hero-grid {
+    grid-template-columns: 1fr;
+    gap: 40px;
+  }
+
+  .hero-figure {
+    max-width: 560px;
+  }
+
+  .cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* --- Phones --- */
+@media (max-width: 720px) {
+  body {
+    font-size: 16px;
+  }
+
+  .wrap {
+    padding: 0 16px;
+  }
+
+  .site-nav {
+    display: none;
+  }
+
+  .header-row {
+    justify-content: space-between;
+  }
+
+  .hero {
+    padding: 40px 0 48px;
+  }
+
+  .section {
+    padding: 56px 0;
+  }
+
+  .steps,
+  .examples,
+  .limits {
+    grid-template-columns: 1fr;
+  }
+
+  .steps {
+    gap: 14px;
+    margin-bottom: 32px;
+  }
+
+  .cards {
+    grid-template-columns: 1fr;
+  }
+
+  .button-large {
+    width: 100%;
+    text-align: center;
+  }
+
+  .cta-row {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .button,
+  .example {
+    transition: none;
+  }
+}

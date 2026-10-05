@@ -15,7 +15,8 @@ const TYPES = {
 async function startServer() {
   const server = http.createServer(function (request, response) {
     const urlPath = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
-    const file = path.join(ROOT, urlPath === "/" ? "index.html" : urlPath);
+    // A folder's address ("/" or "/app/") serves its index.html, like GitHub Pages
+    const file = path.join(ROOT, urlPath.endsWith("/") ? urlPath + "index.html" : urlPath);
     if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       response.writeHead(404).end("Not found");
       return;
@@ -24,13 +25,15 @@ async function startServer() {
     fs.createReadStream(file).pipe(response);
   });
   await new Promise(function (resolve) { server.listen(0, "127.0.0.1", resolve); });
-  return { server: server, url: "http://127.0.0.1:" + server.address().port + "/" };
+  return { server: server, home: "http://127.0.0.1:" + server.address().port + "/" };
 }
 
-// Starts the server and Chrome, and opens the site. Errors in the page's own
-// code are collected in "pageErrors", so tests can check there were none.
+// Starts the server and Chrome, and opens the tool (at /app/). Errors in the
+// page's own code are collected in "pageErrors", so tests can check there were
+// none. "home" is the landing page's address, "url" the tool's.
 async function openSite() {
-  const { server, url } = await startServer();
+  const { server, home } = await startServer();
+  const url = home + "app/";
   const browser = await puppeteer.launch({
     headless: true,
     protocolTimeout: 900000,
@@ -46,7 +49,7 @@ async function openSite() {
     await browser.close();
     server.close();
   }
-  return { page: page, pageErrors: pageErrors, close: close, url: url, browser: browser };
+  return { page: page, pageErrors: pageErrors, close: close, home: home, url: url, browser: browser };
 }
 
 // Opens the site in a new tab with only the site and its code libraries

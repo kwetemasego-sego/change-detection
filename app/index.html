@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TerraShift: See how the land changes</title>
+
+  <!-- Leaflet's stylesheet (makes the map, zoom buttons and popups look right) -->
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin="">
+
+  <!-- Our own styles -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- The map will be drawn inside this empty box -->
+  <div id="map"></div>
+
+  <!-- The thin line that marks where the before/after swipe cuts the map -->
+  <div id="swipe-line" hidden></div>
+
+  <!-- Control panel that floats on top of the map -->
+  <div id="info-panel">
+    <div class="panel-title"><a href="../" title="About TerraShift">TerraShift</a></div>
+    <div class="tagline">See how the land changes</div>
+    <div class="hint">
+      Compare Sentinel-2 satellite images of an area on two dates.
+      <a href="https://github.com/kwetemasego-sego/terrashift#readme" target="_blank" rel="noopener">How it works, limits and test results</a>
+    </div>
+    <div class="hint responsible-use">
+      Public 10 m satellite data: it can't identify people or vehicles. Don't use it to watch individuals or private property, and have a person check results before acting on them.
+      <a href="https://github.com/kwetemasego-sego/terrashift#responsible-use" target="_blank" rel="noopener">Responsible use</a>
+    </div>
+
+    <div class="step">
+      <strong>1. Area</strong>
+      <!-- Find a place by name (OpenStreetMap's Nominatim) -->
+      <form id="place-search" class="place-search">
+        <input id="place-input" type="search" placeholder="Find a place, e.g. Masdar City" aria-label="Find a place" autocomplete="off">
+        <button id="place-search-button" type="submit">Search</button>
+      </form>
+      <div id="place-search-status" class="small"></div>
+      <ul id="place-results" class="place-results" hidden></ul>
+      <div class="small credit-line">
+        Search by <a href="https://nominatim.org/" target="_blank" rel="noopener">Nominatim</a>,
+        data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors
+      </div>
+      <!-- One-click examples: an area and dates that show the tool well -->
+      <div class="small examples-label">Or try an example:</div>
+      <div id="examples" class="buttons examples"></div>
+      <div class="small">Or mark an area on the map:</div>
+      <div class="buttons">
+        <button id="draw-button" type="button">Draw area</button>
+        <button id="use-view-button" type="button">Use visible area</button>
+      </div>
+      <!-- Click to analyse: while it's on, a click on the map analyses a square around that spot -->
+      <div class="buttons">
+        <button id="click-mode-button" type="button" aria-pressed="false">Click to analyse</button>
+        <label class="small">Square
+          <select id="click-size">
+            <option value="1">1 km</option>
+            <option value="2" selected>2 km</option>
+            <option value="5">5 km</option>
+          </select>
+        </label>
+      </div>
+      <div id="area-text" class="small">No area chosen yet</div>
+    </div>
+
+    <div class="step">
+      <strong>2. Dates</strong>
+      <div class="dates">
+        <label>Before <input id="before-date" type="date"></label>
+        <label>After <input id="after-date" type="date"></label>
+      </div>
+      <div class="buttons">
+        <button id="find-button" type="button">Find images</button>
+        <button id="copy-link-button" type="button" disabled>Copy link</button>
+      </div>
+      <div id="copy-link-status" class="small"></div>
+    </div>
+
+    <div class="step">
+      <div><strong>Before image:</strong> <span id="before-info">-</span></div>
+      <div><strong>After image:</strong> <span id="after-info">-</span></div>
+      <!-- Brightness of the Sentinel-2 photos. "hidden" until photos are shown. -->
+      <div id="brightness-row" class="brightness" hidden>
+        <label for="brightness-slider">Brightness</label>
+        <input id="brightness-slider" type="range" min="50" max="200" step="10" value="100">
+        <span id="brightness-value">100%</span>
+      </div>
+      <div id="status-text" class="status">Start by choosing an area.</div>
+    </div>
+
+    <!-- 3. The results, in three tabs. "hidden" until an area is chosen. -->
+    <div class="step" id="results-step" hidden>
+      <div class="tabs" role="tablist" aria-label="Results">
+        <button id="tab-changes" type="button" role="tab" aria-controls="panel-changes" aria-selected="true">Changes</button>
+        <button id="tab-terrain" type="button" role="tab" aria-controls="panel-terrain" aria-selected="false">Terrain</button>
+        <button id="tab-place" type="button" role="tab" aria-controls="panel-place" aria-selected="false">Place details</button>
+      </div>
+
+      <!-- Tab 1: Changes -->
+      <div id="panel-changes" role="tabpanel" aria-labelledby="tab-changes">
+        <div id="changes-empty" class="small">Press Find images to look for changes between your two dates.</div>
+        <!-- Results of the change detection. "hidden" until there are results. -->
+        <div class="result-part" id="change-section" hidden>
+          <strong>Changes found</strong>
+          <!-- Each kind of change: its colour, name, size on the ground, and share of the area -->
+          <ul class="legend change-legend">
+            <li><span class="swatch gained"></span><span>Plants gained</span><b id="size-gained"></b><span id="pct-gained" class="pct"></span></li>
+            <li><span class="swatch lost"></span><span>Plants lost</span><b id="size-lost"></b><span id="pct-lost" class="pct"></span></li>
+            <li><span class="swatch built"></span><span>New buildings or bare ground</span><b id="size-built"></b><span id="pct-built" class="pct"></span></li>
+            <li><span class="swatch burned"></span><span>Burned</span><b id="size-burned"></b><span id="pct-burned" class="pct"></span></li>
+          </ul>
+          <div id="change-total"></div>
+          <div id="bright-note" class="small" hidden></div>
+          <div class="small">
+            <span class="swatch skipped"></span>Skipped because of cloud, shadow or missing data:
+            <span id="pct-skipped"></span>
+          </div>
+          <!-- Shown when the two images are from different seasons -->
+          <div id="season-note" class="season-note" hidden>
+            <div id="season-text"></div>
+            <div class="buttons">
+              <button id="year-check-button" type="button">Compare with a year earlier</button>
+              <button id="year-check-toggle" type="button" hidden>Show year-apart changes</button>
+            </div>
+            <div id="year-check-text" class="small"></div>
+          </div>
+          <div class="small">
+            A hectare (ha) is 10,000 m²: a square 100 m long on each side, a bit bigger than a football pitch.
+          </div>
+          <div class="buttons">
+            <button id="change-toggle" type="button">Hide changes</button>
+          </div>
+          <div class="buttons">
+            <button id="report-button" type="button">Download report</button>
+            <button id="geojson-button" type="button">Download GeoJSON</button>
+          </div>
+          <div id="download-status" class="small"></div>
+          <details class="small">
+            <summary>How are changes found?</summary>
+            <p>
+              Each 10 m square gets a plant greenness score (NDVI) and a built-up score
+              (NDBI), both from −1 to +1. A square only counts as changed if its plant
+              score moved by <b>0.15</b> or more, or its built-up score rose by <b>0.10</b>
+              or more. Smaller shifts usually come from haze, the sun's angle or the
+              season, not from real changes on the ground.
+            </p>
+            <p>
+              Bright new surfaces, like white fill on a building plot, can make the built-up
+              score go <i>down</i>. So a square also counts as new buildings or bare ground if
+              it became at least <b>30%</b> brighter in visible light than the area as a whole
+              did, ends up brighter than the area's usual ground, and is part of a patch of at
+              least <b>2,500 m²</b>. Ground beside water or plants is left out, because drying
+              out makes it brighter too. So is ground on slopes of <b>15°</b> or more (from the
+              Terrain tab): the sun lights steep slopes much more or less brightly as it gets
+              higher or lower through the year, so brightening there is usually just the light.
+            </p>
+            <p>
+              Surfaces that were already dark, like solar panels, dark roofs and asphalt,
+              aren't counted as new buildings if they only got darker. Dust, cleaning and
+              shadows do that without anything new being built.
+            </p>
+            <p>
+              A square counts as <b>burned</b> if its burn ratio (NBR) fell by <b>0.27</b> or
+              more, the level usually called a moderate burn, where there were some plants
+              to burn. Burned ground goes dark in near-infrared light but not in short-wave
+              infrared, so squares that went dark in both (shadows, water, new dark roofs)
+              are not counted as burned. Nor are squares that got brighter in near-infrared,
+              like wet mud drying out.
+            </p>
+            <p>
+              A changed square also needs at least 2 neighbours that changed the same way,
+              because real changes cover a patch of ground. Water and shorelines, ground
+              that was wet before, and ground that fell into a new shadow are left out,
+              because tides and the sun make them look different without anything changing.
+            </p>
+            <p>
+              Lawns, crops and trees green up and dry out with the seasons. If your two
+              images are from different seasons, a note says so, and <b>Compare with a year
+              earlier</b> shows how much of the plant change is probably seasonal.
+            </p>
+          </details>
+        </div>
+
+        <!-- The time series: images between the two dates. "hidden" until it starts loading. -->
+        <div class="result-part" id="series-section" hidden>
+          <strong>Over time</strong>
+          <div id="series-status" class="small"></div>
+          <progress id="series-progress" hidden></progress>
+          <div id="series-chart" class="chart"></div>
+          <div id="series-player" hidden>
+            <ul class="legend series-legend">
+              <li><span class="line-swatch ndvi"></span>Plant score (NDVI)</li>
+              <li><span class="line-swatch ndbi"></span>Built-up score (NDBI)</li>
+            </ul>
+            <div id="series-readout" class="small"></div>
+            <div class="buttons">
+              <button id="play-button" type="button">Play</button>
+              <label class="small">Speed
+                <select id="speed-select">
+                  <option value="1500">Slow</option>
+                  <option value="700" selected>Normal</option>
+                  <option value="250">Fast</option>
+                </select>
+              </label>
+              <button id="back-button" type="button" hidden>Back to before/after</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Terrain, from the Copernicus elevation model -->
+      <div id="panel-terrain" role="tabpanel" aria-labelledby="tab-terrain" hidden>
+        <div id="terrain-status" class="small"></div>
+        <div id="terrain-results" hidden>
+          <dl class="facts">
+            <dt>Elevation</dt><dd id="terrain-elevation"></dd>
+            <dt>Slope</dt><dd id="terrain-slope"></dd>
+            <dt>Aspect</dt><dd id="terrain-aspect"></dd>
+            <dt>Low-lying</dt><dd id="terrain-low"></dd>
+          </dl>
+          <div class="buttons">
+            <button id="hillshade-button" type="button">Show hillshade</button>
+          </div>
+          <div class="small"><strong>Elevation profile</strong> from west to east, along the dashed line on the map:</div>
+          <div id="profile-chart" class="chart"></div>
+          <div class="small">
+            Heights are of the surface, so in towns they include buildings and trees,
+            and the steepest slope may be the edge of a building.
+          </div>
+        </div>
+        <!-- What the terrain words mean: filled in from TERRAIN_WORDS in main.js -->
+        <div class="small words-title"><strong>What the words mean</strong></div>
+        <dl id="terrain-words" class="small words"></dl>
+        <div class="credits">
+          Elevation: Copernicus DEM GLO-30, 30 m, © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH
+          2014–2018, provided under COPERNICUS by the European Union and ESA, via Microsoft Planetary Computer.
+        </div>
+      </div>
+
+      <!-- Tab 3: Place details for the centre of the area -->
+      <div id="panel-place" role="tabpanel" aria-labelledby="tab-place" hidden>
+        <div class="small">For the centre of the chosen area <span id="place-coords"></span>.</div>
+        <dl class="facts">
+          <dt>Elevation</dt>   <dd id="detail-elevation">-</dd>
+          <dt>Weather now</dt> <dd id="detail-weather">-</dd>
+          <dt>Climate</dt>     <dd id="detail-climate">-</dd>
+          <dt>Soil</dt>        <dd id="detail-soil">-</dd>
+          <dt>Land cover</dt>  <dd id="detail-landcover">-</dd>
+          <dt>Wildlife</dt>    <dd id="detail-wildlife">-</dd>
+        </dl>
+        <div class="credits">
+          Data: Copernicus Sentinel-2 via Microsoft Planetary Computer · Open-Meteo · ISRIC SoilGrids ·
+          © OpenStreetMap contributors · GBIF.
+          <a href="https://github.com/kwetemasego-sego/terrashift/blob/main/CREDITS.md" target="_blank" rel="noopener">Full credits</a>.
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="small"><strong>Pointer:</strong> <span id="pointer-position">-</span></div>
+      <div class="buttons">
+        <button id="map-view-button" type="button">Show street map</button>
+        <button id="locate-button" type="button">Locate me</button>
+      </div>
+      <div id="locate-status"></div>
+    </div>
+  </div>
+
+  <!-- Notes at the top middle of the map -->
+  <div id="map-notes">
+    <!-- The date of the time-series image on the map -->
+    <div id="frame-date" hidden></div>
+    <!-- Shown when zoomed in closer than the Sentinel-2 photos' 10 m pixels can show -->
+    <div id="zoom-note" hidden>Zoom out for a clearer image</div>
+  </div>
+
+  <!-- The before/after slider. "hidden" keeps it invisible until there are images to compare. -->
+  <div id="swipe-bar" hidden>
+    <span id="swipe-before-label">Before</span>
+    <input id="swipe-slider" type="range" min="0" max="100" value="50" aria-label="Swipe between before and after">
+    <span id="swipe-after-label">After</span>
+  </div>
+
+  <!-- Leaflet's JavaScript (the mapping library itself) -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+          crossorigin=""></script>
+
+  <!-- geotiff.js reads the satellite image files (GeoTIFFs) in the browser -->
+  <script src="https://cdn.jsdelivr.net/npm/geotiff@3.0.5/dist-browser/geotiff.js"></script>
+
+  <!-- jsPDF makes the PDF report in the browser -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js"
+          integrity="sha512-plOdviVmws4Y3JAvbnpfKb2hVxKM1lCwsi3vmElYRj+tiDLffZ4FVUj5a8vyKJ9pIgl8JCAHEJ4D1iUKBecswg=="
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+  <!-- proj4 converts latitude/longitude into the satellite images' own map grid (UTM) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.15.0/proj4.js"></script>
+
+  <!-- Our own code. It must come AFTER the libraries above, because it uses them. -->
+  <script src="main.js"></script>
+</body>
+</html>
