@@ -159,3 +159,64 @@ test("the summary adds up", async function () {
   assert.equal(numbers.total, "Changed: 3.0 ha (3.3%) of the 90.0 ha (9,000 squares) that could be compared.");
   assert.equal(numbers.skipped, "10.0 ha (10.0% of the area)");
 });
+
+test("access passes are kept until shortly before they run out, and 'too many requests' is retried", async function () {
+  const result = await inPage(async function () {
+    const realFetch = window.fetch;
+    const asked = [];
+    let answers = []; // made-up answers, used in turn
+    window.fetch = async function (url) {
+      asked.push(String(url));
+      const [status, body, headers] = answers.shift();
+      return new Response(JSON.stringify(body), { status: status, headers: headers || {} });
+    };
+    try {
+      const inAnHour = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      const inTwoMinutes = new Date(Date.now() + 2 * 60 * 1000).toISOString();
+      keptToken = null;
+      keptSignedUrls.clear();
+
+      // A token lasting an hour is asked for once and then reused
+      answers = [[200, { token: "first", "msft:expiry": inAnHour }]];
+      const tokens = [await getToken(), await getToken()];
+      const tokenRequests = asked.length;
+
+      // One running out within 5 minutes is replaced
+      keptToken.expires = Date.parse(inTwoMinutes);
+      answers = [[200, { token: "second", "msft:expiry": inAnHour }]];
+      tokens.push(await getToken());
+
+      // Signed addresses are kept for each file
+      asked.length = 0;
+      answers = [[200, { href: "signed-a", "msft:expiry": inAnHour }], [200, { href: "signed-b", "msft:expiry": inAnHour }]];
+      const signed = [await signedUrl("file-a"), await signedUrl("file-a"), await signedUrl("file-b")];
+      const signRequests = asked.length;
+
+      // Error 429: wait as asked (1 second) and try again
+      asked.length = 0;
+      keptToken = null;
+      answers = [[429, {}, { "Retry-After": "1" }], [200, { token: "third", "msft:expiry": inAnHour }]];
+      const started = performance.now();
+      tokens.push(await getToken());
+      const waited = performance.now() - started;
+      const retryRequests = asked.length;
+
+      // Three 429s in a row: give up with the error
+      keptToken = null;
+      answers = [[429, {}, { "Retry-After": "1" }], [429, {}, { "Retry-After": "1" }], [429, {}, {}]];
+      const error = await getToken().then(function () { return "no error"; }, function (e) { return e.message; });
+      return { tokens, tokenRequests, signed, signRequests, waited, retryRequests, error };
+    } finally {
+      window.fetch = realFetch;
+      keptToken = null;
+      keptSignedUrls.clear();
+    }
+  });
+  assert.deepEqual(result.tokens, ["first", "first", "second", "third"]);
+  assert.equal(result.tokenRequests, 1, "the token was asked for once");
+  assert.deepEqual(result.signed, ["signed-a", "signed-a", "signed-b"]);
+  assert.equal(result.signRequests, 2, "one signed address per file");
+  assert.equal(result.retryRequests, 2, "asked again after the 429");
+  assert.ok(result.waited >= 950, "waited about the second asked for (" + Math.round(result.waited) + " ms)");
+  assert.equal(result.error, "The website answered with error 429");
+});

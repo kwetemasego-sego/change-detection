@@ -289,7 +289,7 @@ Then:
 
 Each test prints ✔ when it passes and ✖ with the reason when it fails. Riyadh City is marked as a known miss ("TODO"): it is reported but doesn't make the run fail.
 
-The real-image tests depend on Microsoft Planetary Computer. If it is busy or down they can fail even though nothing is wrong with the code; they try each site 3 times first.
+The real-image tests depend on Microsoft Planetary Computer. If it is busy or down they can fail even though nothing is wrong with the code; they try each site 3 times first, waiting 30 and then 60 seconds between tries. The service also limits how often its free access passes can be asked for, so the site keeps each pass until shortly before it runs out (about an hour) instead of asking for a new one at every search, and if it is told "too many requests" (error 429) it waits and asks again.
 
 ### Automatic tests on GitHub
 

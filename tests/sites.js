@@ -32,13 +32,17 @@ const SITES = [
 
 // Runs one site and returns its numbers (areas in m², percentages of the compared area)
 async function runSite(page, site) {
-  // The image service sometimes drops a request, so try up to 3 times
+  // The image service sometimes drops a request or is busy, so try up to 3 times
   for (let attempt = 1; ; attempt++) {
     try {
       return await runSiteOnce(page, site);
     } catch (error) {
       if (attempt >= 3) throw error;
-      console.log(site.id + ": attempt " + attempt + " failed (" + error.message + "), trying again");
+      // Wait before trying again (30 s, then 60 s), so a busy service has time
+      // to recover instead of being asked again straight away
+      const wait = 30 * attempt;
+      console.log(site.id + ": attempt " + attempt + " failed (" + error.message + "), trying again in " + wait + " s");
+      await new Promise(function (resolve) { setTimeout(resolve, wait * 1000); });
       await page.reload({ waitUntil: "networkidle2" });
     }
   }

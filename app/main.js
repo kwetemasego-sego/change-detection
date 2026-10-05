@@ -532,10 +532,42 @@ const ONE_DAY = 24 * 60 * 60 * 1000; // in milliseconds
 const SKIP_CLASSES = [0, 1, 3, 8, 9, 10];
 const WATER_CLASS = 6; // SCL also marks water
 
-// Gets the free token (temporary pass) needed to read Planetary Computer's image files
+// Gets the free token (temporary pass) needed to read Planetary Computer's image files.
+// A token lasts about an hour ("msft:expiry"), so it is kept and reused until
+// shortly before then: the service limits how often passes can be asked for,
+// and asking for a new one at every search soon runs into that limit.
+const PASS_MARGIN_MS = 5 * 60 * 1000; // ask for a new pass 5 minutes before the old one runs out
+let keptToken = null; // { token, expires } (expires in milliseconds), or null
+
+function passStillGood(pass) {
+  return pass && pass.expires - PASS_MARGIN_MS > Date.now();
+}
+
+// When a pass runs out; if the answer doesn't say, it's treated as lasting 30 minutes
+function passExpiry(data) {
+  const expires = Date.parse(data["msft:expiry"]);
+  return Number.isFinite(expires) ? expires : Date.now() + 30 * 60 * 1000;
+}
+
 async function getToken() {
-  const data = await fetchJson(TOKEN_URL);
-  return data.token;
+  if (!passStillGood(keptToken)) {
+    const data = await fetchJson(TOKEN_URL);
+    keptToken = { token: data.token, expires: passExpiry(data) };
+  }
+  return keptToken.token;
+}
+
+// The same for the elevation model's signed web addresses, one per file
+const keptSignedUrls = new Map(); // file address -> { href, expires }
+
+async function signedUrl(href) {
+  let pass = keptSignedUrls.get(href);
+  if (!passStillGood(pass)) {
+    const data = await fetchJson(SIGN_URL + encodeURIComponent(href));
+    pass = { href: data.href, expires: passExpiry(data) };
+    keptSignedUrls.set(href, pass);
+  }
+  return pass.href;
 }
 
 // Finds the photos near a date that cover the whole area, and checks the
@@ -2690,8 +2722,7 @@ async function readElevation(area, grid) {
   const heights = new Float32Array(grid.lats.length).fill(NaN);
   // An area can cross the edge of a tile, so each tile fills in the points it covers
   for (const tile of found.features) {
-    const signed = await fetchJson(SIGN_URL + encodeURIComponent(tile.assets.data.href));
-    const values = await readFileOnGrid(signed.href, points);
+    const values = await readFileOnGrid(await signedUrl(tile.assets.data.href), points);
     for (let i = 0; i < values.length; i++) {
       if (values[i] > -1000) heights[i] = values[i]; // leaves out "no data" (NaN, or -32767)
     }
@@ -3019,13 +3050,24 @@ async function showDetail(elementId, getText, lat, lng, thisLookup) {
 
 // Downloads data from a website and reads it as JSON (a common data format).
 // Gives up after 20 seconds so a slow website can't leave us waiting forever.
+// If a website says "too many requests" (error 429), waits and tries again,
+// up to 3 tries. The wait is what the website asks for ("Retry-After"), or
+// 2 then 4 seconds, and never more than 30 seconds.
 async function fetchJson(url, options = {}) {
-  options.signal = AbortSignal.timeout(20000);
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    throw new Error("The website answered with error " + response.status);
+  for (let attempt = 1; ; attempt++) {
+    options.signal = AbortSignal.timeout(20000);
+    const response = await fetch(url, options);
+    if (response.status === 429 && attempt < 3) {
+      const asked = Number(response.headers.get("Retry-After"));
+      const seconds = Math.min(30, asked > 0 ? asked : 2 * attempt);
+      await new Promise(function (resolve) { setTimeout(resolve, seconds * 1000); });
+      continue;
+    }
+    if (!response.ok) {
+      throw new Error("The website answered with error " + response.status);
+    }
+    return response.json();
   }
-  return response.json();
 }
 
 // --- Elevation (Open-Meteo) ---
